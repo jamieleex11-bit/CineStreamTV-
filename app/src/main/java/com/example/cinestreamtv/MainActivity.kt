@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +18,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -31,11 +34,15 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -50,6 +57,9 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -59,12 +69,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
+// ---------- App Meta ----------
+private const val APP_VERSION = "1.4.0"
+
 // ---------- Theme Colors ----------
-private val NetBlack = Color(0xFF141414)
+private val NetBlack = Color(0xFF0B0B0B)
 private val NetDarkGray = Color(0xFF1F1F1F)
 private val NetRed = Color(0xFFE50914)
 private val NetWhite = Color(0xFFFFFFFF)
-private val NetMuted = Color(0xFF8C8C8C)
+private val NetMuted = Color(0xFF9A9A9A)
+private val NetGold = Color(0xFFD4AF37)
 
 // ---------- Data Models ----------
 data class Film(
@@ -105,7 +119,12 @@ val start: Long
 
 data class Provider(val label: String, val tmdbId: Int)
 
-data class Catalog(val all: List<Film>, val rows: List<Pair<String, List<Film>>>)
+/** all = flat pool for search/hero. rows = ordered shelves (label -> titles). ranked = first row is a Top 10. */
+data class Catalog(
+val all: List<Film>,
+val rows: List<Pair<String, List<Film>>>,
+val ranked: Set<String> = emptySet()
+)
 
 private val Resume.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
 private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
@@ -199,17 +218,39 @@ return body
 } finally { c.disconnect() }
 }
 
+// ---------- TMDB ----------
+private data class RowSpec(val label: String, val paths: List<Pair<String, String>>)
+
 private object Tmdb {
 private const val BASE = "https://api.themoviedb.org/3"
 private const val REGION = "US"
+private const val PAGES = 3
 
-// TMDB watch-provider IDs (US region)
 val providers = listOf(
 Provider("Netflix", 8),
 Provider("Prime Video", 9),
 Provider("Disney+", 337),
 Provider("Apple TV+", 350),
 Provider("MAX", 1899)
+)
+
+private val movieGenres = listOf(
+"Action & Adventure" to 28,
+"Comedy" to 35,
+"Horror" to 27,
+"Sci-Fi" to 878,
+"Animation" to 16,
+"Documentaries" to 99,
+"Thrillers" to 53,
+"Crime" to 80,
+"Romance" to 10749
+)
+
+private val tvGenres = listOf(
+"Drama Series" to 18,
+"Sci-Fi & Fantasy TV" to 10765,
+"Reality TV" to 10764,
+"Mystery Series" to 9648
 )
 
 private fun call(path: String, key: String): String {
@@ -250,32 +291,66 @@ try { toFilm(arr.getJSONObject(it), fallbackKind, label) } catch (_: Exception) 
 }
 }
 
-/** Trending row + one genuinely provider-filtered row per service. */
-suspend fun load(key: String): Catalog = withContext(Dispatchers.IO) {
-val all = LinkedHashMap<String, Film>()
-try {
-parse(call("/trending/all/week", key), "movie", "").forEach { all.putIfAbsent(it.id, it) }
-} catch (_: Exception) {}
+private fun discover(kind: String, query: String, page: Int) =
+"/discover/$kind?$query&sort_by=popularity.desc&page=$page"
 
-val rows = ArrayList<Pair<String, List<Film>>>()
+private fun specs(): List<RowSpec> {
+val s = ArrayList<RowSpec>()
+
+s.add(RowSpec("Top 10 Today", listOf("/trending/all/day" to "movie")))
+s.add(RowSpec("Trending Now", (1..PAGES).map { "/trending/all/week?page=$it" to "movie" }))
+s.add(RowSpec("New Releases", (1..PAGES).map { "/movie/now_playing?page=$it" to "movie" }))
+s.add(RowSpec("Coming Soon", (1..PAGES).map { "/movie/upcoming?page=$it" to "movie" }))
+s.add(RowSpec("Critically Acclaimed", (1..PAGES).map { "/movie/top_rated?page=$it" to "movie" }))
+
 for (p in providers) {
-val row = LinkedHashMap<String, Film>()
-for (kind in listOf("movie", "tv")) {
-try {
-val path = "/discover/$kind?with_watch_providers=${p.tmdbId}" +
-"&watch_region=$REGION&with_watch_monetization_types=flatrate" +
-"&sort_by=popularity.desc"
-parse(call(path, key), kind, p.label).forEach { f ->
-row.putIfAbsent(f.id, f)
-all.putIfAbsent(f.id, f)
+val q = "with_watch_providers=${p.tmdbId}&watch_region=$REGION&with_watch_monetization_types=flatrate"
+val paths = ArrayList<Pair<String, String>>()
+for (pg in 1..2) {
+paths.add(discover("movie", q, pg) to "movie")
+paths.add(discover("tv", q, pg) to "tv")
 }
-} catch (_: Exception) {}
-}
-if (row.isNotEmpty()) rows.add(p.label to row.values.toList())
+s.add(RowSpec(p.label, paths))
 }
 
-val merged = all.values.toList()
-if (merged.isEmpty()) Catalog(demoFilms, emptyList()) else Catalog(merged, rows)
+for ((label, id) in movieGenres) {
+s.add(RowSpec(label, (1..2).map { discover("movie", "with_genres=$id", it) to "movie" }))
+}
+for ((label, id) in tvGenres) {
+s.add(RowSpec(label, (1..2).map { discover("tv", "with_genres=$id", it) to "tv" }))
+}
+
+s.add(RowSpec("Binge-Worthy TV", (1..PAGES).map { "/tv/popular?page=$it" to "tv" }))
+s.add(RowSpec("Top Rated TV", (1..PAGES).map { "/tv/top_rated?page=$it" to "tv" }))
+s.add(RowSpec("Airing This Week", (1..2).map { "/tv/on_the_air?page=$it" to "tv" }))
+
+return s
+}
+
+private fun fetchRow(key: String, spec: RowSpec): Pair<String, List<Film>> {
+val row = LinkedHashMap<String, Film>()
+for ((path, kind) in spec.paths) {
+try {
+parse(call(path, key), kind, "").forEach { row.putIfAbsent(it.id, it) }
+} catch (_: Exception) {}
+}
+return spec.label to row.values.toList()
+}
+
+/** Big parallel catalog: ~50 requests, ~1000+ unique titles. */
+suspend fun load(key: String): Catalog = withContext(Dispatchers.IO) {
+val specs = specs()
+val ranked = specs.take(1).map { it.label }.toSet()
+
+val fetched = coroutineScope {
+specs.map { spec -> async { fetchRow(key, spec) } }.awaitAll()
+}.filter { it.second.isNotEmpty() }
+
+val all = LinkedHashMap<String, Film>()
+fetched.forEach { (_, list) -> list.forEach { all.putIfAbsent(it.id, it) } }
+
+if (all.isEmpty()) Catalog(demoFilms, emptyList())
+else Catalog(all.values.toList(), fetched, ranked)
 }
 
 suspend fun search(key: String, q: String): List<Film> = withContext(Dispatchers.IO) {
@@ -283,8 +358,22 @@ try {
 parse(call("/search/multi?query=${URLEncoder.encode(q, "UTF-8")}&include_adult=false", key), "movie", "")
 } catch (_: Exception) { emptyList() }
 }
+
+/** IMDb rating via TMDB external ids -> OMDb. Returns "rating" to "votes". */
+suspend fun imdb(tmdbKey: String, omdbKey: String, film: Film): Pair<String, String>? = withContext(Dispatchers.IO) {
+try {
+val kind = if (film.kind == "Series") "tv" else "movie"
+val imdbId = JSONObject(call("/$kind/${film.tmdbId}/external_ids", tmdbKey)).str("imdb_id")
+if (imdbId.isEmpty()) return@withContext null
+val o = JSONObject(httpGet("https://www.omdbapi.com/?i=$imdbId&apikey=$omdbKey"))
+val r = o.str("imdbRating")
+if (r.isEmpty() || r == "N/A") return@withContext null
+r to o.str("imdbVotes")
+} catch (e: Exception) { null }
+}
 }
 
+// ---------- TorBox ----------
 private object Tb {
 private const val BASE = "https://api.torbox.app/v1/api"
 private val VIDEO = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".ts")
@@ -341,8 +430,8 @@ if (o.optBoolean("success", false)) "Connected" else "Invalid Key"
 class MainActivity : ComponentActivity() {
 override fun onCreate(savedInstanceState: Bundle?) {
 super.onCreate(savedInstanceState)
-window.statusBarColor = android.graphics.Color.rgb(20, 20, 20)
-window.navigationBarColor = android.graphics.Color.rgb(20, 20, 20)
+window.statusBarColor = android.graphics.Color.rgb(11, 11, 11)
+window.navigationBarColor = android.graphics.Color.rgb(11, 11, 11)
 setContent { NetCleanApp() }
 }
 }
@@ -355,6 +444,7 @@ val scope = rememberCoroutineScope()
 
 var torboxKey by remember { mutableStateOf(prefs.getString("torbox_token", "") ?: "") }
 var tmdbKey by remember { mutableStateOf(prefs.getString("tmdb_key", "") ?: "") }
+var omdbKey by remember { mutableStateOf(prefs.getString("omdb_key", "") ?: "") }
 var screen by remember { mutableStateOf("Home") }
 var selectedProvider by remember { mutableStateOf<String?>(null) }
 var detail by remember { mutableStateOf<Film?>(null) }
@@ -451,6 +541,7 @@ film = d, msg = detailMsg, matches = matches, busy = detailBusy,
 resumePos = matchingResume?.pos ?: 0L,
 resumeDur = matchingResume?.dur ?: 0L,
 isInWatchlist = isInWatchlist,
+tmdbKey = tmdbKey, omdbKey = omdbKey,
 onToggleWatchlist = {
 if (isInWatchlist) watchlist.removeAll { it.id == d.id } else watchlist.add(d)
 saveWatchlist(prefs, watchlist)
@@ -476,12 +567,8 @@ onBack = { detail = null }
 )
 }
 
-// Nav lives in normal layout flow here, so it can never cover
-// the scrolling content or fight it for input.
-else -> Column(Modifier.fillMaxSize().background(NetBlack)) {
-NetTopNav(current = screen) { screen = it; selectedProvider = null }
-
-Box(Modifier.fillMaxWidth().weight(1f)) {
+else -> {
+// Content layer
 if (prov != null) {
 val kindFilter = if (screen == "Shows") "Series" else "Movie"
 val row = catalog.rows.firstOrNull { it.first == prov }?.second
@@ -494,18 +581,18 @@ onFilm = { open(it) }, onBack = { selectedProvider = null }
 } else {
 when (screen) {
 "Home" -> HomeScreen(
-catalog = catalog.all, rows = catalog.rows, resume = resume,
+catalog = catalog, resume = resume,
 loading = homeLoading, error = homeError,
 onFilm = { open(it) },
 onResume = { r -> play = PlayReq(r.filmId, r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) }
 )
 "Shows" -> ProviderHubScreen(
-title = "TV Shows Hub",
+title = "TV Shows",
 available = catalog.rows.map { it.first }.ifEmpty { Tmdb.providers.map { it.label } },
 onSelect = { selectedProvider = it }
 )
 "Movies" -> ProviderHubScreen(
-title = "Movies Hub",
+title = "Movies",
 available = catalog.rows.map { it.first }.ifEmpty { Tmdb.providers.map { it.label } },
 onSelect = { selectedProvider = it }
 )
@@ -515,10 +602,21 @@ else -> SettingsScreen(
 torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
 onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
 tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
+omdbKey = omdbKey, onOmdb = { omdbKey = it.trim(); prefs.edit().putString("omdb_key", it.trim()).apply() },
 link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
 )
 }
 }
+
+// Top scrim so the floating nav is always readable
+Box(
+Modifier.align(Alignment.TopCenter).fillMaxWidth().height(110.dp)
+.background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)))
+)
+
+// Floating nav — overlay, never in the scroll, hero runs full-bleed behind it
+Box(Modifier.align(Alignment.TopCenter)) {
+NetTopNav(current = screen) { screen = it; selectedProvider = null }
 }
 }
 }
@@ -526,18 +624,18 @@ link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsW
 }
 }
 
-// ---------- Top Navigation Bar ----------
+// ---------- Top Navigation ----------
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
 Box(
-Modifier.fillMaxWidth().padding(vertical = 10.dp),
+Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp),
 contentAlignment = Alignment.Center
 ) {
 Row(
 modifier = Modifier
 .clip(RoundedCornerShape(50.dp))
-.background(Color(0xFF222222))
-.border(1.dp, Color(0xFF444444), RoundedCornerShape(50.dp))
+.background(Color(0xE61A1A1A))
+.border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(50.dp))
 .padding(horizontal = 6.dp, vertical = 6.dp),
 verticalAlignment = Alignment.CenterVertically,
 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -557,19 +655,16 @@ private fun CapsuleNavItem(label: String, isSelected: Boolean, onClick: () -> Un
 var focused by remember { mutableStateOf(false) }
 val requester = remember { FocusRequester() }
 val active = isSelected || focused
+val scale by animateFloatAsState(if (focused) 1.07f else 1f, label = "navScale")
 
 Box(
 modifier = Modifier
 .onFocusChanged { focused = it.isFocused }
-.scale(if (focused) 1.06f else 1f)
+.scale(scale)
 .clip(RoundedCornerShape(50.dp))
 .background(if (active) NetWhite else Color.Transparent)
 .focusRequester(requester)
-.clickable {
-// Keep focus in sync with selection on both remote and touch.
-runCatching { requester.requestFocus() }
-onClick()
-}
+.clickable { runCatching { requester.requestFocus() }; onClick() }
 .padding(horizontal = 18.dp, vertical = 8.dp),
 contentAlignment = Alignment.Center
 ) {
@@ -582,6 +677,7 @@ fontWeight = FontWeight.Bold
 }
 }
 
+// ---------- Shared Components ----------
 @Composable
 private fun NetCard(
 modifier: Modifier = Modifier,
@@ -589,13 +685,14 @@ onClick: () -> Unit,
 content: @Composable BoxScope.(Boolean) -> Unit
 ) {
 var focused by remember { mutableStateOf(false) }
+val scale by animateFloatAsState(if (focused) 1.07f else 1f, label = "cardScale")
 Box(
 modifier
-.scale(if (focused) 1.06f else 1f)
+.scale(scale)
 .onFocusChanged { focused = it.isFocused }
-.clip(RoundedCornerShape(6.dp))
+.clip(RoundedCornerShape(8.dp))
 .background(NetDarkGray)
-.then(if (focused) Modifier.border(3.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
+.then(if (focused) Modifier.border(3.dp, NetWhite, RoundedCornerShape(8.dp)) else Modifier)
 .clickable(onClick = onClick)
 ) {
 content(this, focused)
@@ -603,9 +700,17 @@ content(this, focused)
 }
 
 @Composable
-private fun PosterCard(film: Film, showProvider: Boolean = false, onClick: () -> Unit) {
-NetCard(modifier = Modifier.width(150.dp).height(220.dp), onClick = onClick) {
+private fun PosterCard(film: Film, showProvider: Boolean = false, width: Dp = 150.dp, onClick: () -> Unit) {
+NetCard(modifier = Modifier.width(width).height(width * 1.47f), onClick = onClick) { focused ->
 AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000)), startY = 200f)))
+if (focused) {
+Text(
+film.name, color = NetWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 2,
+overflow = TextOverflow.Ellipsis,
+modifier = Modifier.align(Alignment.BottomStart).padding(start = 8.dp, end = 8.dp, bottom = 8.dp)
+)
+}
 if (showProvider && film.provider.isNotEmpty()) {
 Box(
 Modifier.align(Alignment.TopEnd).padding(6.dp)
@@ -619,12 +724,26 @@ Text(film.provider, color = NetWhite, fontSize = 9.sp, fontWeight = FontWeight.B
 }
 
 @Composable
+private fun RankCard(rank: Int, film: Film, onClick: () -> Unit) {
+Row(verticalAlignment = Alignment.Bottom) {
+Text(
+"$rank",
+color = Color(0xFF3D3D3D),
+fontSize = 92.sp,
+fontWeight = FontWeight.Black,
+modifier = Modifier.offset(x = 10.dp).padding(end = 2.dp)
+)
+PosterCard(film, width = 140.dp, onClick = onClick)
+}
+}
+
+@Composable
 private fun ResumeCard(r: Resume, onClick: () -> Unit) {
 NetCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
 if (r.image.isNotEmpty()) {
 AsyncImage(model = r.image, contentDescription = r.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
 }
-Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
+Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xE6000000)))))
 Text(
 r.name, color = NetWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
 modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
@@ -637,37 +756,33 @@ Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(NetRed))
 }
 
 @Composable
-private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
-if (list.isEmpty()) return
-Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-Text(
-title, color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
-)
-LazyRow(
-contentPadding = PaddingValues(horizontal = 24.dp),
-horizontalArrangement = Arrangement.spacedBy(14.dp)
+private fun RowTitle(title: String) {
+Row(
+Modifier.padding(start = 32.dp, bottom = 10.dp),
+verticalAlignment = Alignment.CenterVertically,
+horizontalArrangement = Arrangement.spacedBy(8.dp)
 ) {
-items(list, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
-}
+Box(Modifier.width(3.dp).height(18.dp).background(NetRed, RoundedCornerShape(2.dp)))
+Text(title, color = NetWhite, fontSize = 19.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.3.sp)
 }
 }
 
 @Composable
 private fun HeroButton(label: String, filled: Boolean, requester: FocusRequester? = null, onClick: () -> Unit) {
 var focused by remember { mutableStateOf(false) }
-val base = if (filled) Color(0xFFE5E5E5) else Color(0x59FFFFFF)
+val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "heroBtn")
+val base = if (filled) Color(0xFFF2F2F2) else Color(0x59FFFFFF)
 Box(
 modifier = Modifier
-.height(44.dp)
+.height(46.dp)
 .then(if (requester != null) Modifier.focusRequester(requester) else Modifier)
-.scale(if (focused) 1.05f else 1f)
+.scale(scale)
 .onFocusChanged { focused = it.isFocused }
 .clip(RoundedCornerShape(6.dp))
 .background(if (focused) NetWhite else base)
 .then(if (focused) Modifier.border(2.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
 .clickable(onClick = onClick)
-.padding(horizontal = 22.dp),
+.padding(horizontal = 24.dp),
 contentAlignment = Alignment.Center
 ) {
 Text(
@@ -679,35 +794,23 @@ fontSize = 15.sp, fontWeight = FontWeight.Bold
 }
 
 @Composable
-private fun HeroBanner(film: Film, onOpen: () -> Unit) {
+private fun HeroContent(film: Film, onOpen: () -> Unit, modifier: Modifier = Modifier) {
 val requester = remember { FocusRequester() }
-Box(
-Modifier
-.fillMaxWidth()
-.height(380.dp)
-.background(NetBlack)
-) {
-if (film.backdrop.isNotEmpty()) {
-AsyncImage(
-model = film.backdrop, contentDescription = film.name,
-modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-)
-}
-Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent, NetBlack), startY = 0f, endY = 380f)))
-Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.92f), Color.Transparent), endX = 700f)))
 
 Column(
-Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 28.dp).width(600.dp),
-verticalArrangement = Arrangement.spacedBy(10.dp)
+modifier.padding(start = 32.dp, bottom = 34.dp).widthIn(max = 660.dp),
+verticalArrangement = Arrangement.spacedBy(12.dp)
 ) {
 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-Text("STREAMING ON", color = NetMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-Box(Modifier.background(NetRed, RoundedCornerShape(2.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+Text("STREAMING ON", color = NetMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.5.sp)
+Box(Modifier.background(NetRed, RoundedCornerShape(2.dp)).padding(horizontal = 7.dp, vertical = 3.dp)) {
 Text(film.provider, color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 }
 }
-Text(film.name, color = NetWhite, fontSize = 40.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-
+Text(
+film.name, color = NetWhite, fontSize = 46.sp, fontWeight = FontWeight.Black,
+maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 50.sp
+)
 Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
 Text(film.year, color = NetMuted, fontSize = 13.sp)
 Text("•", color = NetMuted)
@@ -718,47 +821,75 @@ Text("★ ${film.rating}", color = Color(0xFF46D369), fontSize = 13.sp, fontWeig
 }
 }
 Text(
-film.overview, color = NetWhite.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 2,
-overflow = TextOverflow.Ellipsis, lineHeight = 20.sp
+film.overview, color = NetWhite.copy(alpha = 0.88f), fontSize = 14.sp, maxLines = 3,
+overflow = TextOverflow.Ellipsis, lineHeight = 21.sp
 )
 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 HeroButton("▶ Play", filled = true, requester = requester, onClick = onOpen)
 HeroButton("ⓘ More Info", filled = false, onClick = onOpen)
 }
 }
-}
 
 LaunchedEffect(Unit) {
-delay(250)
+delay(300)
 runCatching { requester.requestFocus() }
 }
 }
 
 @Composable
 private fun HomeScreen(
-catalog: List<Film>,
-rows: List<Pair<String, List<Film>>>,
+catalog: Catalog,
 resume: List<Resume>,
 loading: Boolean,
 error: String,
 onFilm: (Film) -> Unit,
 onResume: (Resume) -> Unit
 ) {
-val hero = catalog.firstOrNull() ?: demoFilms.first()
-val shelves = rows.filter { it.second.isNotEmpty() }
+val hero = catalog.all.firstOrNull() ?: demoFilms.first()
+val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.74f).dp
+val heroPx = with(LocalDensity.current) { heroHeight.toPx() }
+val listState = rememberLazyListState()
 
-LazyColumn(Modifier.fillMaxSize()) {
-item(key = "hero") { HeroBanner(hero) { onFilm(hero) } }
+// How far the hero has scrolled, clamped to its height.
+val scrolled by remember {
+derivedStateOf {
+if (listState.firstVisibleItemIndex > 0) heroPx
+else listState.firstVisibleItemScrollOffset.toFloat().coerceAtMost(heroPx)
+}
+}
+
+Box(Modifier.fillMaxSize().background(NetBlack)) {
+// PINNED hero backdrop — stays put while the content slides over it.
+Box(
+Modifier
+.fillMaxWidth()
+.height(heroHeight)
+.graphicsLayer {
+translationY = scrolled * 0.30f
+alpha = (1f - scrolled / (heroPx * 0.75f)).coerceIn(0f, 1f)
+}
+) {
+if (hero.backdrop.isNotEmpty()) {
+AsyncImage(model = hero.backdrop, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+}
+Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent, NetBlack), startY = 0f, endY = heroPx)))
+Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 800f)))
+}
+
+// Scrolling layer
+LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+item(key = "hero") {
+Box(Modifier.fillMaxWidth().height(heroHeight)) {
+HeroContent(hero, onOpen = { onFilm(hero) }, modifier = Modifier.align(Alignment.BottomStart))
+}
+}
 
 if (resume.isNotEmpty()) {
 item(key = "resume") {
-Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-Text(
-"Continue Watching", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
-)
+Column(Modifier.fillMaxWidth().padding(vertical = 14.dp)) {
+RowTitle("Continue Watching")
 LazyRow(
-contentPadding = PaddingValues(horizontal = 24.dp),
+contentPadding = PaddingValues(horizontal = 32.dp),
 horizontalArrangement = Arrangement.spacedBy(14.dp)
 ) {
 items(resume, key = { it.key }) { r -> ResumeCard(r) { onResume(r) } }
@@ -769,58 +900,63 @@ items(resume, key = { it.key }) { r -> ResumeCard(r) { onResume(r) } }
 
 if (error.isNotEmpty()) {
 item(key = "err") {
-Text(error, color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 24.dp, top = 8.dp))
+Text(error, color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 32.dp, top = 8.dp))
 }
 }
 if (loading) {
 item(key = "loading") {
 Row(
-Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
+Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 12.dp),
 verticalAlignment = Alignment.CenterVertically,
 horizontalArrangement = Arrangement.spacedBy(12.dp)
 ) {
 CircularProgressIndicator(color = NetRed, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-Text("Loading catalog...", color = NetMuted, fontSize = 13.sp)
+Text("Building your library...", color = NetMuted, fontSize = 13.sp)
 }
 }
 }
 
-item(key = "trending") {
-Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-Text(
-"Trending Now", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
-)
+catalog.rows.forEach { (label, list) ->
+if (list.isEmpty()) return@forEach
+item(key = "row_$label") {
+Column(Modifier.fillMaxWidth().padding(vertical = 14.dp)) {
+RowTitle(label)
 LazyRow(
-contentPadding = PaddingValues(horizontal = 24.dp),
+contentPadding = PaddingValues(horizontal = 32.dp),
 horizontalArrangement = Arrangement.spacedBy(14.dp)
 ) {
-items(catalog.take(20), key = { it.id }) { f -> PosterCard(f, showProvider = true) { onFilm(f) } }
+if (label in catalog.ranked) {
+itemsIndexed(list.take(10), key = { _, f -> f.id }) { i, f ->
+RankCard(i + 1, f) { onFilm(f) }
+}
+} else {
+items(list, key = { it.id }) { f ->
+PosterCard(f, showProvider = true) { onFilm(f) }
+}
+}
+}
 }
 }
 }
 
-shelves.forEach { (label, list) ->
-item(key = "shelf_$label") { Shelf(label, list, onFilm) }
+item(key = "spacer") { Spacer(Modifier.height(48.dp)) }
 }
-
-item(key = "spacer") { Spacer(Modifier.height(40.dp)) }
 }
 }
 
-// ---------- Provider Hub Screen ----------
+// ---------- Provider Hub ----------
 private val providerColors = mapOf(
 "Netflix" to Color(0xFF661111),
 "Disney+" to Color(0xFF113366),
 "MAX" to Color(0xFF331166),
 "Prime Video" to Color(0xFF115544),
-"Apple TV+" to Color(0xFF111111)
+"Apple TV+" to Color(0xFF1A1A1A)
 )
 
 @Composable
 private fun ProviderHubScreen(title: String, available: List<String>, onSelect: (String) -> Unit) {
-Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp)) {
-Text(title, color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 24.dp)) {
+Text(title, color = NetWhite, fontSize = 30.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 22.dp))
 
 LazyVerticalGrid(
 columns = GridCells.Fixed(2),
@@ -830,21 +966,23 @@ modifier = Modifier.fillMaxSize()
 ) {
 items(available) { label ->
 var focused by remember { mutableStateOf(false) }
+val scale by animateFloatAsState(if (focused) 1.05f else 1f, label = "provScale")
 Box(
 modifier = Modifier
 .fillMaxWidth()
-.height(140.dp)
-.scale(if (focused) 1.04f else 1f)
+.height(150.dp)
+.scale(scale)
 .onFocusChanged { focused = it.isFocused }
-.clip(RoundedCornerShape(12.dp))
-.background(providerColors[label] ?: Color(0xFF222222))
-.border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(12.dp))
+.clip(RoundedCornerShape(14.dp))
+.background(Brush.horizontalGradient(listOf(providerColors[label] ?: Color(0xFF222222), Color(0xFF141414))))
+.border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(14.dp))
 .clickable { onSelect(label) },
 contentAlignment = Alignment.Center
 ) {
 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-Text(label, color = NetWhite, fontSize = 28.sp, fontWeight = FontWeight.Black)
-Text("$label Collection", color = NetMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+Text(label, color = NetWhite, fontSize = 30.sp, fontWeight = FontWeight.Black)
+Box(Modifier.width(40.dp).height(2.dp).background(NetGold))
+Text("Browse collection", color = NetMuted, fontSize = 13.sp, letterSpacing = 0.5.sp)
 }
 }
 }
@@ -852,15 +990,15 @@ Text("$label Collection", color = NetMuted, fontSize = 13.sp, fontWeight = FontW
 }
 }
 
-// ---------- My List / Watchlist Screen ----------
+// ---------- My List ----------
 @Composable
 private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit) {
-Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp)) {
-Text("My Watchlist", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 24.dp)) {
+Text("My List", color = NetWhite, fontSize = 30.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 22.dp))
 
 if (watchlist.isEmpty()) {
 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-Text("Your watchlist is empty. Add shows or movies to watch later!", color = NetMuted, fontSize = 16.sp)
+Text("Your list is empty. Add shows or movies to watch later.", color = NetMuted, fontSize = 16.sp)
 }
 } else {
 LazyVerticalGrid(
@@ -875,11 +1013,11 @@ items(watchlist, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
 }
 }
 
-// ---------- Provider Dedicated Catalog Screen ----------
+// ---------- Provider Catalog ----------
 @Composable
 private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit) {
-Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp)) {
-Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 20.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 24.dp)) {
+Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 22.dp)) {
 var focused by remember { mutableStateOf(false) }
 Box(
 modifier = Modifier
@@ -893,12 +1031,13 @@ modifier = Modifier
 ) {
 Text("← Back", color = NetWhite, fontWeight = FontWeight.Bold)
 }
-Text("$providerName $kind", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+Text("$providerName · $kind", color = NetWhite, fontSize = 26.sp, fontWeight = FontWeight.Black)
+Text("${catalog.size} titles", color = NetMuted, fontSize = 13.sp)
 }
 
 if (catalog.isEmpty()) {
 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-Text("No items found in this category.", color = NetMuted, fontSize = 16.sp)
+Text("Nothing in this category yet.", color = NetMuted, fontSize = 16.sp)
 }
 } else {
 LazyVerticalGrid(
@@ -917,11 +1056,11 @@ items(catalog, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
 private fun SearchScreen(
 query: String, onQuery: (String) -> Unit, results: List<Film>, searching: Boolean, onFilm: (Film) -> Unit
 ) {
-Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 16.dp)) {
 OutlinedTextField(
 value = query, onValueChange = onQuery, singleLine = true,
-label = { Text("Search title, genre...") },
-shape = RoundedCornerShape(6.dp),
+label = { Text("Search the whole catalog...") },
+shape = RoundedCornerShape(8.dp),
 colors = OutlinedTextFieldDefaults.colors(
 focusedTextColor = NetWhite, unfocusedTextColor = NetWhite,
 focusedBorderColor = NetWhite, unfocusedBorderColor = Color(0x33FFFFFF),
@@ -934,8 +1073,8 @@ Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arra
 CircularProgressIndicator(color = NetRed, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
 Text("Searching...", color = NetMuted, fontSize = 13.sp)
 }
-} else if (query.isNotBlank() && results.isEmpty()) {
-Text("No results for \"$query\".", color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(bottom = 12.dp))
+} else if (query.isNotBlank()) {
+Text("${results.size} results for \"$query\"", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 12.dp))
 }
 LazyVerticalGrid(
 columns = GridCells.Adaptive(150.dp),
@@ -948,42 +1087,55 @@ items(results, key = { it.id }) { f -> PosterCard(f, showProvider = true) { onFi
 }
 }
 
+// ---------- Settings ----------
 @Composable
 private fun SettingsScreen(
 torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: String,
-tmdbKey: String, onTmdb: (String) -> Unit, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
+tmdbKey: String, onTmdb: (String) -> Unit,
+omdbKey: String, onOmdb: (String) -> Unit,
+link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
 ) {
+val field = OutlinedTextFieldDefaults.colors(
+focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray,
+focusedBorderColor = NetWhite, unfocusedBorderColor = Color(0x33FFFFFF),
+focusedTextColor = NetWhite, unfocusedTextColor = NetWhite
+)
+
 Column(
-Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp),
+Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+.padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 16.dp),
 verticalArrangement = Arrangement.spacedBy(12.dp)
 ) {
-Text("App Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+Text("Settings", color = NetWhite, fontSize = 30.sp, fontWeight = FontWeight.Black)
+
 Text("TorBox API Key", color = NetMuted, fontSize = 13.sp)
-OutlinedTextField(
-value = torboxKey, onValueChange = onTorbox, singleLine = true, shape = RoundedCornerShape(6.dp),
-colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray, focusedBorderColor = NetWhite, unfocusedBorderColor = Color(0x33FFFFFF)),
-modifier = Modifier.fillMaxWidth()
-)
+OutlinedTextField(value = torboxKey, onValueChange = onTorbox, singleLine = true, shape = RoundedCornerShape(8.dp), colors = field, modifier = Modifier.fillMaxWidth())
 NetCard(onClick = onTest) { Text("Test TorBox Connection", color = NetWhite, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
 if (tbStatus.isNotEmpty()) Text(tbStatus, color = NetWhite, fontSize = 14.sp)
 
-Text("TMDB API Key (For Catalogs & Posters)", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
-OutlinedTextField(
-value = tmdbKey, onValueChange = onTmdb, singleLine = true, shape = RoundedCornerShape(6.dp),
-colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray, focusedBorderColor = NetWhite, unfocusedBorderColor = Color(0x33FFFFFF)),
-modifier = Modifier.fillMaxWidth()
-)
+Text("TMDB API Key (catalog)", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+OutlinedTextField(value = tmdbKey, onValueChange = onTmdb, singleLine = true, shape = RoundedCornerShape(8.dp), colors = field, modifier = Modifier.fillMaxWidth())
+
+Text("OMDb API Key (IMDb ratings — optional)", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
+OutlinedTextField(value = omdbKey, onValueChange = onOmdb, singleLine = true, shape = RoundedCornerShape(8.dp), colors = field, modifier = Modifier.fillMaxWidth())
 
 Text("Direct Stream Link", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
-OutlinedTextField(
-value = link, onValueChange = onLink, singleLine = true, shape = RoundedCornerShape(6.dp),
-colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray, focusedBorderColor = NetWhite, unfocusedBorderColor = Color(0x33FFFFFF)),
-modifier = Modifier.fillMaxWidth()
-)
+OutlinedTextField(value = link, onValueChange = onLink, singleLine = true, shape = RoundedCornerShape(8.dp), colors = field, modifier = Modifier.fillMaxWidth())
 NetCard(onClick = onPlayLink) { Text("Play Link", color = NetWhite, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
+
+Spacer(Modifier.height(28.dp))
+Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1FFFFFFF)))
+Spacer(Modifier.height(16.dp))
+
+Text("CineStream TV", color = NetWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+Text("Version $APP_VERSION", color = NetMuted, fontSize = 12.sp)
+Text("Made by Jamie", color = NetGold, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+Text("Catalog data by TMDB · Ratings by IMDb/OMDb", color = Color(0xFF5A5A5A), fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+Spacer(Modifier.height(20.dp))
 }
 }
 
+// ---------- Details ----------
 @Composable
 private fun DetailsScreen(
 film: Film,
@@ -993,6 +1145,8 @@ busy: Boolean,
 resumePos: Long,
 resumeDur: Long,
 isInWatchlist: Boolean,
+tmdbKey: String,
+omdbKey: String,
 onToggleWatchlist: () -> Unit,
 onPlay: (Long) -> Unit,
 onPick: (TbFile, Long) -> Unit,
@@ -1001,6 +1155,14 @@ onBack: () -> Unit
 val hasProgress = resumePos > 5000 && resumeDur > 0
 val progressFraction = if (hasProgress) (resumePos.toFloat() / resumeDur.toFloat()).coerceIn(0f, 1f) else 0f
 val buttonText = if (hasProgress) "Resume" else "Play"
+
+var imdb by remember(film.id) { mutableStateOf("") }
+LaunchedEffect(film.id) {
+if (omdbKey.isNotBlank() && tmdbKey.isNotBlank()) {
+val r = Tmdb.imdb(tmdbKey, omdbKey, film)
+if (r != null) imdb = r.first
+}
+}
 
 val ordered = remember(matches) {
 matches.sortedWith(
@@ -1016,10 +1178,10 @@ Box(Modifier.fillMaxSize()) {
 if (film.backdrop.isNotEmpty()) {
 AsyncImage(model = film.backdrop, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
 }
-Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.9f), NetBlack.copy(alpha = 0.4f)))))
+Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.92f), NetBlack.copy(alpha = 0.45f)))))
 
 Column(
-Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 40.dp),
+Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 40.dp, vertical = 48.dp),
 verticalArrangement = Arrangement.spacedBy(16.dp)
 ) {
 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1033,36 +1195,40 @@ Modifier
 .padding(horizontal = 10.dp, vertical = 4.dp)
 ) { Text("← Back", color = NetWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
 
-Text("Streaming on:", color = NetMuted, fontSize = 14.sp)
+Text("Streaming on", color = NetMuted, fontSize = 13.sp)
 Box(Modifier.background(NetRed, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
 Text(film.provider, color = NetWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
 }
 }
 
-Text(film.name, color = NetWhite, fontSize = 40.sp, fontWeight = FontWeight.Black)
+Text(film.name, color = NetWhite, fontSize = 44.sp, fontWeight = FontWeight.Black, lineHeight = 48.sp)
 
 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
 if (film.rating.isNotEmpty()) {
 Text("★ ${film.rating}", color = Color(0xFF46D369), fontSize = 15.sp, fontWeight = FontWeight.Bold)
 }
+if (imdb.isNotEmpty()) {
+Box(Modifier.background(NetGold.copy(alpha = 0.15f), RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+Text("IMDb $imdb", color = NetGold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+}
+}
 Text(film.year, color = NetWhite, fontSize = 15.sp, fontWeight = FontWeight.Medium)
 Text(film.kind, color = NetMuted, fontSize = 15.sp)
 }
 
-Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 4, lineHeight = 22.sp, modifier = Modifier.width(600.dp))
+Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 5, lineHeight = 23.sp, modifier = Modifier.widthIn(max = 640.dp))
 
 Spacer(Modifier.height(8.dp))
 
 var playFocused by remember { mutableStateOf(false) }
 Box(
 modifier = Modifier
-.width(320.dp)
-.height(52.dp)
+.width(330.dp)
+.height(54.dp)
 .scale(if (playFocused) 1.04f else 1f)
 .onFocusChanged { playFocused = it.isFocused }
 .clip(RoundedCornerShape(6.dp))
-.background(if (playFocused) NetWhite else Color(0xFFE5E5E5))
-.then(if (playFocused) Modifier.border(2.5.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
+.background(if (playFocused) NetWhite else Color(0xFFF2F2F2))
 .clickable { if (!busy) onPlay(resumePos) },
 contentAlignment = Alignment.CenterStart
 ) {
@@ -1083,13 +1249,13 @@ Text(if (busy) "Loading..." else buttonText, color = Color.Black, fontSize = 16.
 var listFocused by remember { mutableStateOf(false) }
 Box(
 modifier = Modifier
-.width(320.dp)
+.width(330.dp)
 .height(48.dp)
 .scale(if (listFocused) 1.04f else 1f)
 .onFocusChanged { listFocused = it.isFocused }
 .clip(RoundedCornerShape(6.dp))
-.background(if (listFocused) Color(0xFF444444) else Color(0xFF2B2B2B))
-.border(if (listFocused) 2.dp else 1.dp, if (listFocused) NetWhite else Color(0x55FFFFFF), RoundedCornerShape(6.dp))
+.background(if (listFocused) Color(0xFF3A3A3A) else Color(0xFF242424))
+.border(1.dp, if (listFocused) NetWhite else Color(0x44FFFFFF), RoundedCornerShape(6.dp))
 .clickable(onClick = onToggleWatchlist),
 contentAlignment = Alignment.Center
 ) {
@@ -1107,7 +1273,7 @@ if (msg.isNotEmpty()) Text(msg, color = NetMuted, fontSize = 14.sp, modifier = M
 
 if (ordered.isNotEmpty()) {
 Spacer(Modifier.height(10.dp))
-Text("Select File Variant from TorBox:", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+Text("${ordered.size} files in your library", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
 ordered.forEach { f ->
 val ep = episodeOf(f.name)
 val tag = buildString {
@@ -1129,6 +1295,7 @@ Text(tag, color = NetMuted, fontSize = 12.sp)
 }
 }
 
+// ---------- Player ----------
 @Composable
 private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Long) -> Unit) {
 val context = LocalContext.current

@@ -2009,5 +2009,3 @@ private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Lon
             Text(error, color = NetWhite, fontSize = 14.sp, modifier = Modifier.align(Alignment.BottomCenter).padding(24.dp))
         }
     }
-}
-```

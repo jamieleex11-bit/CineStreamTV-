@@ -59,7 +59,6 @@ private val NetDarkGray = Color(0xFF1F1F1F)
 private val NetRed = Color(0xFFE50914)
 private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF8C8C8C)
-private val FocusBg = Color(0xFF2A2A2A)
 
 // ---------- Data Models ----------
 data class Film(
@@ -102,8 +101,8 @@ private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileI
 private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
 
 private val demoFilms = listOf(
-    Film("d1", "The Hateful Eight", "2015", "Movie", poster("/j9oHXEXwckgnvR2bjjW4gR7G7.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
-        "Bounty hunters seek shelter from a raging blizzard and get caught up in a plot of betrayal and deception.", "7.8"),
+    Film("d1", "Avatar: The Last Airbender", "2024", "Series", poster("/z4nriHz7ioQ0gX9Kj5kX5kX5kX5.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
+        "A young boy known as the Avatar reawakens to save a world war-torn by the Fire Nation.", "8.1"),
     Film("d2", "Blood & Water", "2023", "Series", poster("/b0PlSFdDwbyK0cf5RxwDpaOJQvQ.jpg"), "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
         "A Cape Town teen uncovers secrets about her family's past.", "7.5"),
     Film("d3", "One Day", "2024", "Series", poster("/kXJQv9GBnYJ0AvkWMe5JGPUlOW5.jpg"), "https://image.tmdb.org/t/p/w1280/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
@@ -113,7 +112,7 @@ private val demoFilms = listOf(
 )
 
 private val demoRows: List<Pair<String, List<Film>>> = listOf(
-    "My List" to demoFilms,
+    "Today's Top Picks for You" to demoFilms,
     "Continue Watching" to demoFilms.reversed()
 )
 
@@ -304,7 +303,7 @@ fun NetExactApp() {
     LaunchedEffect(tmdbKey) {
         if (tmdbKey.isBlank()) { rows = demoRows; return@LaunchedEffect }
         val defs = listOf(
-            RowDef("My List", "/trending/all/week", ""),
+            RowDef("Today's Top Picks for You", "/trending/all/week", ""),
             RowDef("Popular Movies", "/movie/popular", "movie"),
             RowDef("Popular Series", "/tv/popular", "tv")
         )
@@ -402,7 +401,7 @@ fun NetExactApp() {
     }
 }
 
-// ---------- Top Navigation ----------
+// ---------- Clean 1-to-1 Netflix Top Navigation ----------
 
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
@@ -410,39 +409,40 @@ private fun NetTopNav(current: String, onNav: (String) -> Unit) {
         Modifier
             .fillMaxWidth()
             .background(NetBlack)
-            .padding(horizontal = 48.dp, vertical = 18.dp),
+            .padding(horizontal = 48.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         NetNavItem(label = "🔍", isSelected = current == "Search") { onNav("Search") }
-        Spacer(Modifier.width(28.dp))
+        Spacer(Modifier.width(32.dp))
 
         NetNavItem(label = "Home", isSelected = current == "Home") { onNav("Home") }
-        Spacer(Modifier.width(28.dp))
+        Spacer(Modifier.width(32.dp))
         NetNavItem(label = "Shows", isSelected = false) { onNav("Home") }
-        Spacer(Modifier.width(28.dp))
+        Spacer(Modifier.width(32.dp))
         NetNavItem(label = "Movies", isSelected = false) { onNav("Home") }
-        Spacer(Modifier.width(28.dp))
+        Spacer(Modifier.width(32.dp))
         NetNavItem(label = "Games", isSelected = false) { onNav("Home") }
 
         Spacer(Modifier.weight(1f))
 
+        // "My Netflix" Pill Button
         var myNetFocused by remember { mutableStateOf(false) }
         Box(
             modifier = Modifier
-                .scale(if (myNetFocused) 1.06f else 1f)
+                .scale(if (myNetFocused) 1.05f else 1f)
                 .onFocusChanged { myNetFocused = it.isFocused }
                 .clip(RoundedCornerShape(50))
-                .background(if (myNetFocused) Color(0xFF444444) else NetDarkGray)
-                .border(if (myNetFocused) 2.dp else 1.dp, if (myNetFocused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(50))
+                .background(if (myNetFocused) Color(0xFF3B3B3B) else NetDarkGray)
+                .border(if (myNetFocused) 1.5.dp else 0.dp, NetWhite, RoundedCornerShape(50))
                 .clickable { onNav("Library") }
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
             Text("My Netflix", color = NetWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
 
-        Spacer(Modifier.width(28.dp))
+        Spacer(Modifier.width(32.dp))
         NetNavItem(label = "⚙️", isSelected = current == "Settings") { onNav("Settings") }
-        Spacer(Modifier.width(28.dp))
+        Spacer(Modifier.width(32.dp))
         Text("N", color = NetRed, fontSize = 28.sp, fontWeight = FontWeight.Black)
     }
 }
@@ -452,18 +452,17 @@ private fun NetNavItem(label: String, isSelected: Boolean, onClick: () -> Unit) 
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
-            .scale(if (focused) 1.08f else 1f)
+            .scale(if (focused) 1.05f else 1f)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (focused) FocusBg else Color.Transparent)
-            .border(if (focused) 1.5.dp else 0.dp, if (focused) NetWhite else Color.Transparent, RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 6.dp)
+            .padding(horizontal = 4.dp, vertical = 4.dp)
     ) {
         Text(
             text = label,
             color = if (isSelected || focused) NetWhite else NetMuted,
-            fontSize = 15.sp,
+            fontSize = 14.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
         )
     }
@@ -512,6 +511,51 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     }
 }
 
+// ---------- Clean Netflix Feature Showcase Hero Banner (Matches Reference[span_6](start_span)[span_6](end_span)) ----------
+@Composable
+private fun HeroBanner(film: Film, onOpen: () -> Unit) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(380.dp)
+            .padding(horizontal = 48.dp, vertical = 12.dp)
+            .clip(RoundedCornerShape(8.dp))
+    ) {
+        if (film.backdrop.isNotEmpty()) {
+            AsyncImage(model = film.backdrop, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC141414)), startY = 150f)))
+        
+        Column(
+            Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 24.dp).width(600.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("N", color = NetRed, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                Text("SERIES", color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+            }
+            Text(film.name, color = NetWhite, fontSize = 32.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Family Time TV", color = NetMuted, fontSize = 12.sp)
+                Text("•", color = NetMuted)
+                Text(film.year, color = NetMuted, fontSize = 12.sp)
+                Text("•", color = NetMuted)
+                Text("8 Episodes", color = NetMuted, fontSize = 12.sp)
+                Text("•", color = NetMuted)
+                Text("TV-PG", color = NetMuted, fontSize = 11.sp, modifier = Modifier.border(1.dp, NetMuted, RoundedCornerShape(2.dp)).padding(horizontal = 3.dp))
+            }
+            
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                Box(Modifier.background(NetRed, RoundedCornerShape(2.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text("Top 10 #2 in TV Shows", color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+                Text("★ Starring cast & crew info", color = NetWhite, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
 @Composable
 private fun HomeScreen(
     rows: List<Pair<String, List<Film>>>,
@@ -521,135 +565,13 @@ private fun HomeScreen(
     onResume: (Resume) -> Unit,
     onSettings: () -> Unit
 ) {
+    val hero = rows.firstOrNull()?.second?.firstOrNull() ?: demoFilms.first()
     LazyColumn(Modifier.fillMaxSize()) {
+        item { HeroBanner(hero) { onFilm(hero) } }
         items(rows) { row -> Shelf(row.first, row.second, onFilm) }
         item { Spacer(Modifier.height(32.dp)) }
     }
 }
-
-// ---------- Netflix Style Details Screen with Progress Bar Button ----------
-
-@Composable
-private fun DetailsScreen(
-    film: Film,
-    msg: String,
-    matches: List<TbFile>,
-    busy: Boolean,
-    resumePos: Long,
-    resumeDur: Long,
-    onPlay: (Long) -> Unit,
-    onPick: (TbFile, Long) -> Unit,
-    onBack: () -> Unit
-) {
-    val hasProgress = resumePos > 5000 && resumeDur > 0
-    val progressFraction = if (hasProgress) (resumePos.toFloat() / resumeDur.toFloat()).coerceIn(0f, 1f) else 0f
-    val buttonText = if (hasProgress) "Resume" else "Play"
-
-    Box(Modifier.fillMaxSize()) {
-        if (film.backdrop.isNotEmpty()) {
-            AsyncImage(
-                model = film.backdrop, contentDescription = null,
-                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-            )
-        }
-        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.9f), NetBlack.copy(alpha = 0.4f)))))
-        
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 56.dp, vertical = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Title Header
-            Text(film.name, color = NetWhite, fontSize = 42.sp, fontWeight = FontWeight.Black)
-
-            // Metadata Row (Match, Year, Rating)
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("77%", color = Color(0xFF46D369), fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                Text(film.year, color = NetWhite, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                Text(film.kind, color = NetMuted, fontSize = 15.sp)
-            }
-
-            // Overview
-            Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 4, lineHeight = 22.sp, modifier = Modifier.width(600.dp))
-
-            Spacer(Modifier.height(8.dp))
-
-            // Netflix-Style Action Button with Built-in Progress Bar
-            var playFocused by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier
-                    .width(320.dp)
-                    .height(52.dp)
-                    .scale(if (playFocused) 1.04f else 1f)
-                    .onFocusChanged { playFocused = it.isFocused }
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (playFocused) NetWhite else Color(0xFFE5E5E5))
-                    .border(if (playFocused) 2.5.dp else 0.dp, NetWhite, RoundedCornerShape(6.dp))
-                    .clickable { if (!busy) onPlay(resumePos) },
-                contentAlignment = Alignment.CenterStart
-            ) {
-                // Background Track for Progress if resuming
-                if (hasProgress) {
-                    Box(Modifier.fillMaxSize().background(Color(0xFFB0B0B0)))
-                    Box(Modifier.fillMaxWidth(progressFraction).fillMaxHeight().background(Color(0xFF8C8C8C)))
-                }
-
-                Row(
-                    Modifier.fillMaxSize().padding(horizontal = 24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(if (hasProgress) "▶" else "▶", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Text(
-                        text = if (busy) "Loading..." else buttonText,
-                        color = Color.Black,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // Secondary Options (Trailer, Watchlist, etc. matching photo[span_1](start_span)[span_1](end_span))
-            DetailOptionRow(label = "Trailer") {}
-            DetailOptionRow(label = "Remove from watchlist") {}
-            DetailOptionRow(label = "More like this") {}
-
-            if (msg.isNotEmpty()) {
-                Text(msg, color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
-            }
-
-            if (matches.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Text("Select File Variant:", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                matches.forEach { f ->
-                    NetCard(modifier = Modifier.fillMaxWidth(), onClick = { onPick(f, resumePos) }) {
-                        Text(f.name + " (" + fmtSize(f.size) + ")", color = NetWhite, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DetailOptionRow(label: String, onClick: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    Row(
-        modifier = Modifier
-            .scale(if (focused) 1.02f else 1f)
-            .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (focused) FocusBg else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("•", color = NetWhite, fontSize = 14.sp)
-        Text(label, color = NetWhite, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-// ---------- Search, Library, Settings Screens ----------
 
 @Composable
 private fun SearchScreen(
@@ -733,7 +655,97 @@ private fun SettingsScreen(
     }
 }
 
-// ---------- Video Player ----------
+@Composable
+private fun DetailsScreen(
+    film: Film,
+    msg: String,
+    matches: List<TbFile>,
+    busy: Boolean,
+    resumePos: Long,
+    resumeDur: Long,
+    onPlay: (Long) -> Unit,
+    onPick: (TbFile, Long) -> Unit,
+    onBack: () -> Unit
+) {
+    val hasProgress = resumePos > 5000 && resumeDur > 0
+    val progressFraction = if (hasProgress) (resumePos.toFloat() / resumeDur.toFloat()).coerceIn(0f, 1f) else 0f
+    val buttonText = if (hasProgress) "Resume" else "Play"
+
+    Box(Modifier.fillMaxSize()) {
+        if (film.backdrop.isNotEmpty()) {
+            AsyncImage(
+                model = film.backdrop, contentDescription = null,
+                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
+            )
+        }
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.9f), NetBlack.copy(alpha = 0.4f)))))
+        
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 56.dp, vertical = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Text(film.name, color = NetWhite, fontSize = 42.sp, fontWeight = FontWeight.Black)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("77%", color = Color(0xFF46D369), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text(film.year, color = NetWhite, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(film.kind, color = NetMuted, fontSize = 15.sp)
+            }
+
+            Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 4, lineHeight = 22.sp, modifier = Modifier.width(600.dp))
+
+            Spacer(Modifier.height(8.dp))
+
+            // Netflix Resume / Play Action Button with Progress Bar
+            var playFocused by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier
+                    .width(320.dp)
+                    .height(52.dp)
+                    .scale(if (playFocused) 1.04f else 1f)
+                    .onFocusChanged { playFocused = it.isFocused }
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (playFocused) NetWhite else Color(0xFFE5E5E5))
+                    .border(if (playFocused) 2.5.dp else 0.dp, NetWhite, RoundedCornerShape(6.dp))
+                    .clickable { if (!busy) onPlay(resumePos) },
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (hasProgress) {
+                    Box(Modifier.fillMaxSize().background(Color(0xFFB0B0B0)))
+                    Box(Modifier.fillMaxWidth(progressFraction).fillMaxHeight().background(Color(0xFF8C8C8C)))
+                }
+
+                Row(
+                    Modifier.fillMaxSize().padding(horizontal = 24.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("▶", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = if (busy) "Loading..." else buttonText,
+                        color = Color.Black,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
+            if (msg.isNotEmpty()) {
+                Text(msg, color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+            }
+
+            if (matches.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text("Select File Variant:", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                matches.forEach { f ->
+                    NetCard(modifier = Modifier.fillMaxWidth(), onClick = { onPick(f, resumePos) }) {
+                        Text(f.name + " (" + fmtSize(f.size) + ")", color = NetWhite, fontSize = 14.sp, modifier = Modifier.padding(16.dp))
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
 private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Long) -> Unit) {

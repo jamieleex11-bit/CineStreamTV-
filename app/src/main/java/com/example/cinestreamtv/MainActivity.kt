@@ -300,9 +300,7 @@ private fun SettingsScreen(
         }
         Text("Playback: this prototype plays direct media URLs entered on the Player screen. TorBox torrent-file selection and adaptive stream handling are the next integration step.", color = Muted, fontSize = 14.sp)
     }
-}
-
-@Composable
+}@Composable
 private fun PlayerScreen(directUrl: String, onUrl: (String) -> Unit, onStatus: (String) -> Unit, status: String) {
     val context = LocalContext.current
     var playing by remember { mutableStateOf(false) }
@@ -340,4 +338,57 @@ private fun PlayerScreen(directUrl: String, onUrl: (String) -> Unit, onStatus: (
             Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(12.dp)).background(Panel), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("▶", color = Red, fontSize = 48.sp)
-                    
+                    Text("Ready to play", color = Color.White, fontSize = 22.sp)
+                    Text(status, color = Muted, fontSize = 13.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActionButton(label: String, onClick: () -> Unit) {
+    Button(onClick = onClick, colors = ButtonDefaults.buttonColors(containerColor = Red, contentColor = Color.White)) {
+        Text(label, fontWeight = FontWeight.Bold)
+    }
+}
+
+private object TorBoxApi {
+    private const val BASE = "https://api.torbox.app/v1/api"
+
+    suspend fun testToken(token: String): Pair<String, String> = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext "Enter your TorBox API key first." to ""
+        request("$BASE/user/me", token)
+    }
+    suspend fun getTorrents(token: String): Pair<String, String> = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext "Enter your TorBox API key first." to ""
+        request("$BASE/torrents/mylist?limit=20&offset=0", token)
+    }
+
+    private fun request(urlString: String, token: String): Pair<String, String> {
+        return try {
+            val connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15000
+                readTimeout = 15000
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("Accept", "application/json")
+            }
+            val code = connection.responseCode
+            val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+            val body = stream.bufferedReader().use { it.readText() }
+            val detail = try {
+                val json = JSONObject(body)
+                json.optString("detail", if (code in 200..299) "TorBox API request successful." else "TorBox request failed.")
+            } catch (_: Exception) {
+                if (code in 200..299) "TorBox API request successful." else "TorBox HTTP error $code."
+            }
+            connection.disconnect()
+            if (code in 200..299) "$detail (HTTP $code)" to body
+            else "$detail (HTTP $code). Check the API key and account." to body
+        } catch (e: Exception) {
+            "Connection failed: ${e.message ?: "unknown network error"}" to ""
+        }
+    }
+}
+

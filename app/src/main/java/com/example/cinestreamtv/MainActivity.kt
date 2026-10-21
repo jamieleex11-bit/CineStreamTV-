@@ -544,7 +544,7 @@ private object TorBoxRepository {
                         files.add(
                             TbFile(
                                 torrentId = torrentId,
-                                fileId = file.optInt("id", -1),
+                                Id = file.optInt("id", -1),
                                 name = fileName.substringAfterLast('/'),
                                 size = file.optLong("size", 0L)
                             )

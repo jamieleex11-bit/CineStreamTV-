@@ -8,6 +8,7 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -406,13 +407,13 @@ fun NetCleanApp() {
                                 val n = norm(d.name)
                                 val m = loadedFiles.filter { n.isNotEmpty() && norm(it.name).contains(n) }
                                 if (m.isEmpty()) detailMsg = "Not found in TorBox library."
-                                else if (m.size == 1) startTb(m[0], d.poster, posToStart)
+                                else if (m.size == 1) startTb(m[0], d.backdrop.ifBlank { d.poster }, posToStart)
                                 else matches = m
                             }
                             detailBusy = false
                         }
                     },
-                    onPick = { f, posToStart -> startTb(f, d.poster, posToStart) },
+                    onPick = { f, posToStart -> startTb(f, d.backdrop.ifBlank { d.poster }, posToStart) },
                     onBack = { detail = null }
                 )
             } else {
@@ -498,13 +499,17 @@ private fun CapsuleNavItem(label: String, isSelected: Boolean, onClick: () -> Un
 private fun NetCard(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    onFocus: (() -> Unit)? = null,
     content: @Composable BoxScope.(Boolean) -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier
             .scale(if (focused) 1.06f else 1f)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocus?.invoke()
+            }
             .clip(RoundedCornerShape(6.dp))
             .background(NetDarkGray)
             .then(if (focused) Modifier.border(3.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
@@ -515,32 +520,62 @@ private fun NetCard(
 }
 
 @Composable
-private fun PosterCard(film: Film, onClick: () -> Unit) {
-    NetCard(modifier = Modifier.width(150.dp).height(220.dp), onClick = onClick) {
+private fun PosterCard(film: Film, onClick: () -> Unit, onFocus: (() -> Unit)? = null) {
+    NetCard(modifier = Modifier.width(150.dp).height(220.dp), onClick = onClick, onFocus = onFocus) {
         AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }
 
 @Composable
 private fun ResumeCard(r: Resume, onClick: () -> Unit) {
-    NetCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
-        if (r.image.isNotEmpty()) {
-            AsyncImage(model = r.image, contentDescription = r.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    val progress = if (r.dur > 0L) (r.pos.toFloat() / r.dur.toFloat()).coerceIn(0f, 1f) else 0f
+    val remainingMs = (r.dur - r.pos).coerceAtLeast(0L)
+    val remainingMinutes = (remainingMs / 60000L).toInt()
+    val remainingLabel = if (r.dur > 0L && remainingMinutes > 0) {
+        if (remainingMinutes >= 60) "${remainingMinutes / 60}h ${remainingMinutes % 60}m left" else "$remainingMinutes min left"
+    } else "Continue watching"
+
+    NetCard(modifier = Modifier.width(300.dp).height(190.dp), onClick = onClick) {
+        if (r.image.isNotBlank()) {
+            AsyncImage(
+                model = r.image,
+                contentDescription = r.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
-        Text(
-            r.name, color = NetWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(listOf(Color.Transparent, Color(0x55000000), Color(0xEE000000)))
+            )
         )
-        val frac = if (r.dur > 0) (r.pos.toFloat() / r.dur.toFloat()).coerceIn(0f, 1f) else 0f
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0xFF555555))) {
-            Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(NetRed))
+        Column(
+            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Text(
+                text = r.name,
+                color = NetWhite,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(remainingLabel, color = Color(0xFFDDDDDD), fontSize = 11.sp, maxLines = 1)
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(4.dp)).background(Color(0xFF777777))) {
+                Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(NetRed))
+            }
         }
     }
 }
 
 @Composable
-private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
+private fun Shelf(
+    title: String,
+    list: List<Film>,
+    onFilm: (Film) -> Unit,
+    onFilmFocus: (Film) -> Unit = {}
+) {
     if (list.isEmpty()) return
     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         Text(
@@ -551,7 +586,9 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(list, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
+            items(list, key = { it.id }, contentType = { "poster" }) { f ->
+                PosterCard(f, onClick = { onFilm(f) }, onFocus = { onFilmFocus(f) })
+            }
         }
     }
 }
@@ -566,11 +603,15 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
             .background(NetBlack)
             .clickable(onClick = onOpen)
     ) {
-        if (film.backdrop.isNotEmpty()) {
-            AsyncImage(
-                model = film.backdrop, contentDescription = film.name,
-                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
-            )
+        Crossfade(targetState = film.backdrop, label = "hero-backdrop") { backdrop ->
+            if (backdrop.isNotEmpty()) {
+                AsyncImage(
+                    model = backdrop,
+                    contentDescription = film.name,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 250f)))
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 700f)))
@@ -611,8 +652,11 @@ private fun HomeScreen(
     onFilm: (Film) -> Unit,
     onResume: (Resume) -> Unit
 ) {
-    val hero = catalog.firstOrNull() ?: demoFilms.first()
-    
+    val defaultHero = catalog.firstOrNull() ?: demoFilms.first()
+    var selectedHero by remember(catalog) { mutableStateOf(defaultHero) }
+    val hero = selectedHero.takeIf { selected -> catalog.any { it.id == selected.id } || demoFilms.any { it.id == selected.id } } ?: defaultHero
+    val onHeroFocus: (Film) -> Unit = { selectedHero = it }
+
     val trending = catalog.take(10)
     val appleFilms = catalog.filter { it.provider == " Apple TV+" }
     val disneyFilms = catalog.filter { it.provider == "Disney+" }
@@ -620,11 +664,17 @@ private fun HomeScreen(
     val netflixFilms = catalog.filter { it.provider == "Netflix" }
     val primeFilms = catalog.filter { it.provider == "Prime Video" }
 
-    LazyColumn(Modifier.fillMaxSize()) {
-        item { HeroBanner(hero) { onFilm(hero) } }
+    val homeListState = androidx.compose.foundation.lazy.rememberLazyListState()
+
+    LazyColumn(
+        state = homeListState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 28.dp)
+    ) {
+        item(key = "hero", contentType = "hero") { HeroBanner(hero) { onFilm(hero) } }
         
         if (resume.isNotEmpty()) {
-            item {
+            item(key = "continue-watching", contentType = "continue-watching") {
                 Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                     Text(
                         "Continue Watching", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
@@ -640,14 +690,14 @@ private fun HomeScreen(
             }
         }
 
-        item { Shelf("Trending Now", trending, onFilm) }
-        item { Shelf(" Apple TV+ Originals", appleFilms, onFilm) }
-        item { Shelf("Disney+ Collection", disneyFilms, onFilm) }
-        item { Shelf("MAX (HBO)", hboFilms, onFilm) }
-        item { Shelf("Netflix Originals", netflixFilms, onFilm) }
-        item { Shelf("Prime Video", primeFilms, onFilm) }
-        
-        item { Spacer(Modifier.height(32.dp)) }
+        item(key = "trending", contentType = "shelf") { Shelf("Trending Now", trending, onFilm, onHeroFocus) }
+        item(key = "apple", contentType = "shelf") { Shelf(" Apple TV+ Originals", appleFilms, onFilm, onHeroFocus) }
+        item(key = "disney", contentType = "shelf") { Shelf("Disney+ Collection", disneyFilms, onFilm, onHeroFocus) }
+        item(key = "max", contentType = "shelf") { Shelf("MAX (HBO)", hboFilms, onFilm, onHeroFocus) }
+        item(key = "netflix", contentType = "shelf") { Shelf("Netflix Originals", netflixFilms, onFilm, onHeroFocus) }
+        item(key = "prime", contentType = "shelf") { Shelf("Prime Video", primeFilms, onFilm, onHeroFocus) }
+
+        item(key = "home-bottom-space", contentType = "spacer") { Spacer(Modifier.height(32.dp)) }
     }
 }
 

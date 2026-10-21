@@ -1,6 +1,4 @@
-Here is the complete, fully validated, and error-free `MainActivity.kt` file. Every line is fully intact with no cutoffs:
 
-```kotlin
 package com.example.cinestreamtv
 
 import android.content.Context

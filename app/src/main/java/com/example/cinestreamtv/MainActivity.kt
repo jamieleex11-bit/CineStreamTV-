@@ -8,7 +8,6 @@ import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.Crossfade
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -624,7 +623,7 @@ private fun Shelf(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(list, key = { it.id }, contentType = { "poster" }) { f ->
+            items(list, key = { it.id }) { f ->
                 PosterCard(f, onClick = { onFilm(f) }, onFocus = { onFilmFocus(f) })
             }
         }
@@ -641,15 +640,13 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
             .background(NetBlack)
             .clickable(onClick = onOpen)
     ) {
-        Crossfade(targetState = film.backdrop, label = "hero-backdrop") { backdrop ->
-            if (backdrop.isNotEmpty()) {
-                AsyncImage(
-                    model = backdrop,
-                    contentDescription = film.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
-            }
+        if (film.backdrop.isNotEmpty()) {
+            AsyncImage(
+                model = film.backdrop,
+                contentDescription = film.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
         }
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 250f)))
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 700f)))
@@ -709,10 +706,10 @@ private fun HomeScreen(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 28.dp)
     ) {
-        item(key = "hero", contentType = "hero") { HeroBanner(hero) { onFilm(hero) } }
+        item(key = "hero") { HeroBanner(hero) { onFilm(hero) } }
         
         if (resume.isNotEmpty()) {
-            item(key = "continue-watching", contentType = "continue-watching") {
+            item(key = "continue-watching") {
                 Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
                     Text(
                         "Continue Watching", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
@@ -728,14 +725,14 @@ private fun HomeScreen(
             }
         }
 
-        item(key = "trending", contentType = "trending") { TrendingTodayShelf(trending, onFilm, onHeroFocus) }
-        item(key = "apple", contentType = "shelf") { Shelf(" Apple TV+ Originals", appleFilms, onFilm, onHeroFocus) }
-        item(key = "disney", contentType = "shelf") { Shelf("Disney+ Collection", disneyFilms, onFilm, onHeroFocus) }
-        item(key = "max", contentType = "shelf") { Shelf("MAX (HBO)", hboFilms, onFilm, onHeroFocus) }
-        item(key = "netflix", contentType = "shelf") { Shelf("Netflix Originals", netflixFilms, onFilm, onHeroFocus) }
-        item(key = "prime", contentType = "shelf") { Shelf("Prime Video", primeFilms, onFilm, onHeroFocus) }
+        item(key = "trending") { TrendingTodayShelf(trending, onFilm, onHeroFocus) }
+        item(key = "apple") { Shelf(" Apple TV+ Originals", appleFilms, onFilm, onHeroFocus) }
+        item(key = "disney") { Shelf("Disney+ Collection", disneyFilms, onFilm, onHeroFocus) }
+        item(key = "max") { Shelf("MAX (HBO)", hboFilms, onFilm, onHeroFocus) }
+        item(key = "netflix") { Shelf("Netflix Originals", netflixFilms, onFilm, onHeroFocus) }
+        item(key = "prime") { Shelf("Prime Video", primeFilms, onFilm, onHeroFocus) }
 
-        item(key = "home-bottom-space", contentType = "spacer") { Spacer(Modifier.height(32.dp)) }
+        item(key = "home-bottom-space") { Spacer(Modifier.height(32.dp)) }
     }
 }
 
@@ -847,7 +844,7 @@ private fun TrendingTodayShelf(list: List<Film>, onFilm: (Film) -> Unit, onFocus
     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         Text("Top 10 Trending Today", color = NetWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, bottom = 10.dp))
         LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(list.take(10), key = { "trending-${it.id}" }, contentType = { "trending-card" }) { film ->
+            items(list.take(10), key = { "trending-${it.id}" }) { film ->
                 val rank = list.indexOf(film) + 1
                 Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy((-10).dp)) {
                     Text(rank.toString(), color = Color(0xFF8A8A8A), fontSize = 84.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(62.dp).align(Alignment.Bottom))

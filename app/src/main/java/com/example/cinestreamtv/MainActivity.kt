@@ -408,24 +408,22 @@ fun NetCleanApp() {
                 val filtered = catalog.filter { it.provider == prov && it.kind == kindFilter }
                 ProviderCatalogScreen(providerName = prov, kind = kindFilter, catalog = filtered, onFilm = { open(it) }, onBack = { selectedProvider = null }, currentNav = screen, onNav = { screen = it; selectedProvider = null })
             } else {
-                Box(Modifier.fillMaxSize()) {
-                    when (screen) {
-                        "Home" -> HomeScreen(catalog = catalog, resume = resume, onFilm = { open(it) }, onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) }, onNav = { screen = it })
-                        "Shows" -> ProviderHubScreen(title = "TV Shows Hub", kind = "Series", onSelect = { selectedProvider = it }, onNav = { screen = it })
-                        "Movies" -> ProviderHubScreen(title = "Movies Hub", kind = "Movie", onSelect = { selectedProvider = it }, onNav = { screen = it })
-                        "My List" -> MyListScreen(watchlist = watchlist, onFilm = { open(it) }, onNav = { screen = it })
-                        "Search" -> SearchScreen(query, { query = it }, results, searching) { open(it) }
-                        "Settings" -> SettingsScreen(
-                            torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
-                            onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
-                            tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
-                            link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
-                        )
-                    }
-
-                    if (screen != "Home") {
-                        Box(Modifier.align(Alignment.TopCenter)) {
-                            NetTopNav(current = screen, onNav = { screen = it; selectedProvider = null })
+                Column(Modifier.fillMaxSize()) {
+                    NetTopNav(current = screen, onNav = { screen = it; selectedProvider = null })
+                    
+                    Box(Modifier.fillMaxSize()) {
+                        when (screen) {
+                            "Home" -> HomeScreen(catalog = catalog, resume = resume, onFilm = { open(it) }, onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) })
+                            "Shows" -> ProviderHubScreen(title = "TV Shows Hub", kind = "Series", onSelect = { selectedProvider = it })
+                            "Movies" -> ProviderHubScreen(title = "Movies Hub", kind = "Movie", onSelect = { selectedProvider = it })
+                            "My List" -> MyListScreen(watchlist = watchlist, onFilm = { open(it) })
+                            "Search" -> SearchScreen(query, { query = it }, results, searching) { open(it) }
+                            "Settings" -> SettingsScreen(
+                                torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
+                                onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
+                                tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
+                                link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
+                            )
                         }
                     }
                 }
@@ -440,14 +438,14 @@ private fun NetTopNav(current: String, onNav: (String) -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .background(Color.Transparent)
-            .padding(top = 24.dp, bottom = 12.dp),
+            .background(NetBlack)
+            .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(50.dp))
-                .background(Color(0xFF222222).copy(alpha = 0.9f))
+                .background(Color(0xFF222222))
                 .border(1.dp, Color(0xFF444444), RoundedCornerShape(50.dp))
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -552,11 +550,11 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
 }
 
 @Composable
-private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, onOpen: () -> Unit) {
+private fun HeroBanner(film: Film, onOpen: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .height(540.dp)
+            .height(440.dp)
             .background(NetBlack)
             .clickable(onClick = onOpen)
     ) {
@@ -566,11 +564,11 @@ private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, 
                 modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
             )
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent, NetBlack), startY = 0f, endY = 540f)))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 200f)))
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 700f)))
         
         Column(
-            Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 40.dp).width(650.dp),
+            Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 32.dp).width(650.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -579,7 +577,7 @@ private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, 
                     Text(film.provider, color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Text(film.name, color = NetWhite, fontSize = 44.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(film.name, color = NetWhite, fontSize = 40.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
             
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(film.year, color = NetMuted, fontSize = 13.sp)
@@ -595,10 +593,6 @@ private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, 
                 overflow = TextOverflow.Ellipsis, lineHeight = 20.sp
             )
         }
-
-        Box(Modifier.align(Alignment.TopCenter)) {
-            NetTopNav(current = currentNav, onNav = onNav)
-        }
     }
 }
 
@@ -607,8 +601,7 @@ private fun HomeScreen(
     catalog: List<Film>,
     resume: List<Resume>,
     onFilm: (Film) -> Unit,
-    onResume: (Resume) -> Unit,
-    onNav: (String) -> Unit
+    onResume: (Resume) -> Unit
 ) {
     val hero = catalog.firstOrNull() ?: demoFilms.first()
     
@@ -620,7 +613,7 @@ private fun HomeScreen(
     val primeFilms = catalog.filter { it.provider == "Prime Video" }
 
     LazyColumn(Modifier.fillMaxSize()) {
-        item { HeroBanner(hero, currentNav = "Home", onNav = onNav, onOpen = { onFilm(hero) }) }
+        item { HeroBanner(hero) { onFilm(hero) } }
         
         if (resume.isNotEmpty()) {
             item {
@@ -652,7 +645,7 @@ private fun HomeScreen(
 
 // ---------- Provider Hub Screen ----------
 @Composable
-private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) -> Unit, onNav: (String) -> Unit) {
+private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) -> Unit) {
     val providers = listOf(
         Triple(" Apple TV+", "Apple TV+ Originals", Color(0xFF111111)),
         Triple("Disney+", "Disney+ Collection", Color(0xFF113366)),
@@ -661,35 +654,33 @@ private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) ->
         Triple("Prime Video", "Prime Video Collection", Color(0xFF115544))
     )
 
-    Column(Modifier.fillMaxSize().padding(top = 80.dp)) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
-            Text(title, color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
-            
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                horizontalArrangement = Arrangement.spacedBy(20.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(providers) { prov ->
-                    var focused by remember { mutableStateOf(false) }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp)
-                            .scale(if (focused) 1.04f else 1f)
-                            .onFocusChanged { focused = it.isFocused }
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(prov.third)
-                            .border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(12.dp))
-                            .focusable()
-                            .clickable { onSelect(prov.first) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(prov.first, color = NetWhite, fontSize = 28.sp, fontWeight = FontWeight.Black)
-                            Text(prov.second, color = NetMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        }
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
+        Text(title, color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
+        
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(providers) { prov ->
+                var focused by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .scale(if (focused) 1.04f else 1f)
+                        .onFocusChanged { focused = it.isFocused }
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(prov.third)
+                        .border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(12.dp))
+                        .focusable()
+                        .clickable { onSelect(prov.first) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(prov.first, color = NetWhite, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                        Text(prov.second, color = NetMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -699,24 +690,22 @@ private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) ->
 
 // ---------- My List / Watchlist Screen ----------
 @Composable
-private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit, onNav: (String) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(top = 80.dp)) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
-            Text("My Watchlist", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
-            
-            if (watchlist.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Your watchlist is empty. Add shows or movies to watch later!", color = NetMuted, fontSize = 16.sp)
-                }
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(150.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(watchlist, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
-                }
+private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
+        Text("My Watchlist", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
+        
+        if (watchlist.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Your watchlist is empty. Add shows or movies to watch later!", color = NetMuted, fontSize = 16.sp)
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(150.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(watchlist, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
             }
         }
     }
@@ -725,8 +714,10 @@ private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit, onNav: (
 // ---------- Provider Dedicated Catalog Screen ----------
 @Composable
 private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit, currentNav: String, onNav: (String) -> Unit) {
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 24.dp)) {
+    Column(Modifier.fillMaxSize()) {
+        NetTopNav(current = currentNav, onNav = onNav)
+        
+        Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 20.dp)) {
                 var focused by remember { mutableStateOf(false) }
                 Box(
@@ -760,10 +751,6 @@ private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: L
                 }
             }
         }
-
-        Box(Modifier.align(Alignment.TopCenter)) {
-            NetTopNav(current = currentNav, onNav = onNav)
-        }
     }
 }
 
@@ -771,7 +758,7 @@ private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: L
 private fun SearchScreen(
     query: String, onQuery: (String) -> Unit, results: List<Film>, searching: Boolean, onFilm: (Film) -> Unit
 ) {
-    Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 16.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 16.dp)) {
         OutlinedTextField(
             value = query, onValueChange = onQuery, singleLine = true,
             label = { Text("Search title, genre...") },
@@ -799,7 +786,7 @@ private fun SettingsScreen(
     torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: String,
     tmdbKey: String, onTmdb: (String) -> Unit, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("App Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text("TorBox API Key", color = NetMuted, fontSize = 13.sp)
         OutlinedTextField(

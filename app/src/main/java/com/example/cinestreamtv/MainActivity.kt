@@ -146,4 +146,25 @@ private fun loadResume(p: SharedPreferences): List<Resume> = try {
     }
 } catch (e: Exception) { emptyList() }
 
-private fun
+private fun saveResume(p: SharedPreferences, list: List<Resume>) {
+    val arr = JSONArray()
+    list.forEach {
+        arr.put(
+            JSONObject().put("name", it.name).put("image", it.image).put("url", it.url)
+                .put("tid", it.torrentId).put("fid", it.fileId).put("pos", it.pos).put("dur", it.dur)
+        )
+    }
+    p.edit().putString("resume", arr.toString()).apply()
+}
+
+private fun httpGet(urlStr: String, bearer: String? = null): String {
+    val c = URL(urlStr).openConnection() as HttpURLConnection
+    c.connectTimeout = 15000
+    c.readTimeout = 20000
+    c.setRequestProperty("Accept", "application/json")
+    if (bearer != null) c.setRequestProperty("Authorization", "Bearer \$bearer")
+    try {
+        val code = c.responseCode
+        val stream = if (code in 200..299) c.inputStream else c.errorStream
+        val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
+        if (code !in 200..299

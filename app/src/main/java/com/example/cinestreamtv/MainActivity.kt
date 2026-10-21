@@ -68,7 +68,7 @@ data class Film(
     val backdrop: String,
     val overview: String,
     val rating: String,
-    val provider: String // " Apple TV+", "Disney+", "MAX", "Netflix", "Prime Video"
+    val provider: String
 )
 
 data class Resume(
@@ -97,7 +97,6 @@ private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileI
 
 private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
 
-// Fallback demo catalog if TMDB key is not added yet
 private val demoFilms = listOf(
     Film("d1", 101, "Ted Lasso", "2023", "Series", poster("/kXJQv9GBnYJ0AvkWMe5JGPUlOW5.jpg"), "https://image.tmdb.org/t/p/w1280/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
         "An American football coach is hired to manage a British soccer team.", "8.6", " Apple TV+"),
@@ -161,7 +160,6 @@ private object Tmdb {
 
     suspend fun catalog(key: String): List<Film> = withContext(Dispatchers.IO) {
         try {
-            // Fetch trending and popular items to build a rich multi-provider catalog
             val body = call("/trending/all/week", key)
             val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
             val out = ArrayList<Film>()
@@ -178,8 +176,6 @@ private object Tmdb {
                 val date = o.str("release_date").ifEmpty { o.str("first_air_date") }
                 val b = o.str("backdrop_path")
                 val r = o.optDouble("vote_average", 0.0)
-                
-                // Deterministically assign a provider based on ID so each show has a distinct streaming home
                 val assignedProvider = providers[id % providers.size]
 
                 out.add(
@@ -255,7 +251,7 @@ fun NetCleanApp() {
 
     var torboxKey by remember { mutableStateOf(prefs.getString("torbox_token", "") ?: "") }
     var tmdbKey by remember { mutableStateOf(prefs.getString("tmdb_key", "") ?: "") }
-    var screen by remember { mutableStateOf("Home") } // "Home", "Shows", "Movies", "Search", "Settings"
+    var screen by remember { mutableStateOf("Home") }
     var detail by remember { mutableStateOf<Film?>(null) }
     var play by remember { mutableStateOf<PlayReq?>(null) }
     var catalog by remember { mutableStateOf(demoFilms) }
@@ -383,7 +379,7 @@ fun NetCleanApp() {
     }
 }
 
-// ---------- Clean Flat Top Nav ----------
+// ---------- Modern Clean Top Navigation ----------
 
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
@@ -394,7 +390,8 @@ private fun NetTopNav(current: String, onNav: (String) -> Unit) {
             .padding(horizontal = 48.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        NetNavItem(label = "🔍", isSelected = current == "Search") { onNav("Search") }
+        // Modern Minimalist Search Button
+        NetNavItem(label = "⌕", isSelected = current == "Search") { onNav("Search") }
         Spacer(Modifier.width(36.dp))
 
         NetNavItem(label = "Home", isSelected = current == "Home") { onNav("Home") }
@@ -425,7 +422,7 @@ private fun NetNavItem(label: String, isSelected: Boolean, onClick: () -> Unit) 
         Text(
             text = label,
             color = if (isSelected || focused) NetWhite else NetMuted,
-            fontSize = 15.sp,
+            fontSize = if (label == "⌕") 20.sp else 15.sp,
             fontWeight = if (isSelected || focused) FontWeight.Bold else FontWeight.Medium
         )
     }
@@ -479,56 +476,64 @@ private fun ResumeCard(r: Resume, onClick: () -> Unit) {
 @Composable
 private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     if (list.isEmpty()) return
-    Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         Text(
             title, color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
         )
+        // Netflix-style fluid, snappy horizontal scroll row
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            items(list) { f -> PosterCard(f) { onFilm(f) } }
+            items(list, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
         }
     }
 }
 
+// ---------- Immersive Full-Width Hero Banner ----------
 @Composable
 private fun HeroBanner(film: Film, onOpen: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .height(380.dp)
-            .padding(horizontal = 48.dp, vertical = 12.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(440.dp) // Expanded immersive height
+            .padding(horizontal = 32.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onOpen)
     ) {
         if (film.backdrop.isNotEmpty()) {
             AsyncImage(model = film.backdrop, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC141414)), startY = 150f)))
+        // Deep gradient overlays for cinematic look
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE141414)), startY = 200f)))
+        Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.8f), Color.Transparent), endX = 500f)))
         
         Column(
-            Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 24.dp).width(600.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            Modifier.align(Alignment.BottomStart).padding(start = 36.dp, bottom = 32.dp).width(650.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("STREAMING ON", color = NetMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 Box(Modifier.background(NetRed, RoundedCornerShape(2.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
                     Text(film.provider, color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Text(film.name, color = NetWhite, fontSize = 32.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(film.name, color = NetWhite, fontSize = 40.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
             
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(film.year, color = NetMuted, fontSize = 12.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(film.year, color = NetMuted, fontSize = 13.sp)
                 Text("•", color = NetMuted)
-                Text(film.kind, color = NetMuted, fontSize = 12.sp)
+                Text(film.kind, color = NetMuted, fontSize = 13.sp)
                 if (film.rating.isNotEmpty()) {
                     Text("•", color = NetMuted)
-                    Text("★ ${film.rating}", color = Color(0xFF46D369), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("★ ${film.rating}", color = Color(0xFF46D369), fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 }
             }
+            Text(
+                film.overview, color = NetWhite.copy(alpha = 0.9f), fontSize = 14.sp, maxLines = 2,
+                overflow = TextOverflow.Ellipsis, lineHeight = 20.sp
+            )
         }
     }
 }
@@ -542,7 +547,6 @@ private fun HomeScreen(
 ) {
     val hero = catalog.firstOrNull() ?: demoFilms.first()
     
-    // Group catalog items into separate provider categories/shelves
     val appleFilms = catalog.filter { it.provider == " Apple TV+" }
     val disneyFilms = catalog.filter { it.provider == "Disney+" }
     val hboFilms = catalog.filter { it.provider == "MAX" }
@@ -561,9 +565,9 @@ private fun HomeScreen(
                     )
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 48.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
-                        items(resume) { r -> ResumeCard(r) { onResume(r) } }
+                        items(resume, key = { it.key }) { r -> ResumeCard(r) { onResume(r) } }
                     }
                 }
             }
@@ -621,11 +625,11 @@ private fun SearchScreen(
         )
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(results) { f -> PosterCard(f) { onFilm(f) } }
+            items(results, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
         }
     }
 }

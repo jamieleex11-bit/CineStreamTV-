@@ -1,3 +1,4 @@
+Kotlin
 package com.example.cinestreamtv
 
 import android.content.Context
@@ -135,6 +136,26 @@ private fun saveResume(p: SharedPreferences, list: List<Resume>) {
     p.edit().putString("resume", arr.toString()).apply()
 }
 
+private fun loadWatchlist(p: SharedPreferences): List<Film> = try {
+    val arr = JSONArray(p.getString("watchlist", "[]"))
+    (0 until arr.length()).map {
+        val o = arr.getJSONObject(it)
+        Film(o.str("id"), o.optInt("tmdbId"), o.str("name"), o.str("year"), o.str("kind"), o.str("poster"), o.str("backdrop"), o.str("overview"), o.str("rating"), o.str("provider"))
+    }
+} catch (e: Exception) { emptyList() }
+
+private fun saveWatchlist(p: SharedPreferences, list: List<Film>) {
+    val arr = JSONArray()
+    list.forEach {
+        arr.put(
+            JSONObject().put("id", it.id).put("tmdbId", it.tmdbId).put("name", it.name).put("year", it.year)
+                .put("kind", it.kind).put("poster", it.poster).put("backdrop", it.backdrop).put("overview", it.overview)
+                .put("rating", it.rating).put("provider", it.provider)
+        )
+    }
+    p.edit().putString("watchlist", arr.toString()).apply()
+}
+
 private fun httpGet(urlStr: String, bearer: String? = null): String {
     val c = URL(urlStr).openConnection() as HttpURLConnection
     c.connectTimeout = 15000
@@ -161,9 +182,11 @@ private object Tmdb {
         try {
             val out = ArrayList<Film>()
             val providers = listOf("Netflix", " Apple TV+", "Disney+", "MAX", "Prime Video")
-            
-            // Fetch multiple pages from trending and popular to build a massive catalog
-            val endpoints = listOf("/trending/all/week?page=1", "/trending/all/week?page=2", "/movie/popular?page=1", "/tv/popular?page=1")
+            val endpoints = listOf(
+                "/trending/all/week?page=1", "/trending/all/week?page=2",
+                "/movie/popular?page=1", "/movie/top_rated?page=1",
+                "/tv/popular?page=1", "/tv/top_rated?page=1"
+            )
             
             for (ep in endpoints) {
                 try {
@@ -274,6 +297,7 @@ fun NetCleanApp() {
     var detailMsg by remember { mutableStateOf("") }
     var detailBusy by remember { mutableStateOf(false) }
     val resume = remember { mutableStateListOf<Resume>().also { it.addAll(loadResume(prefs)) } }
+    val watchlist = remember { mutableStateListOf<Film>().also { it.addAll(loadWatchlist(prefs)) } }
 
     suspend fun loadLibrary() {
         if (torboxKey.isBlank()) { libStatus = "Add TorBox API Key."; return }
@@ -346,10 +370,20 @@ fun NetCleanApp() {
                 PlayerScreen(p, torboxKey) { pos, dur -> report(p, pos, dur) }
             } else if (d != null) {
                 val matchingResume = resume.firstOrNull { it.name.contains(d.name, true) }
+                val isInWatchlist = watchlist.any { it.id == d.id }
                 DetailsScreen(
                     film = d, msg = detailMsg, matches = matches, busy = detailBusy,
                     resumePos = matchingResume?.pos ?: 0L,
                     resumeDur = matchingResume?.dur ?: 0L,
+                    isInWatchlist = isInWatchlist,
+                    onToggleWatchlist = {
+                        if (isInWatchlist) {
+                            watchlist.removeAll { it.id == d.id }
+                        } else {
+                            watchlist.add(d)
+                        }
+                        saveWatchlist(prefs, watchlist)
+                    },
                     onPlay = { posToStart ->
                         scope.launch {
                             detailBusy = true; matches = emptyList(); detailMsg = ""
@@ -379,6 +413,7 @@ fun NetCleanApp() {
                         "Home" -> HomeScreen(catalog = catalog, resume = resume, onFilm = { open(it) }, onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) }, onNav = { screen = it })
                         "Shows" -> ProviderHubScreen(title = "TV Shows Hub", kind = "Series", onSelect = { selectedProvider = it }, onNav = { screen = it })
                         "Movies" -> ProviderHubScreen(title = "Movies Hub", kind = "Movie", onSelect = { selectedProvider = it }, onNav = { screen = it })
+                        "My List" -> MyListScreen(watchlist = watchlist, onFilm = { open(it) }, onNav = { screen = it })
                         "Search" -> {
                             NetTopNav(current = screen, onNav = { screen = it })
                             SearchScreen(query, { query = it }, results, searching) { open(it) }
@@ -422,6 +457,7 @@ private fun NetTopNav(current: String, onNav: (String) -> Unit) {
             CapsuleNavItem(label = "Home", isSelected = current == "Home") { onNav("Home") }
             CapsuleNavItem(label = "Shows", isSelected = current == "Shows") { onNav("Shows") }
             CapsuleNavItem(label = "Movies", isSelected = current == "Movies") { onNav("Movies") }
+            CapsuleNavItem(label = "My List", isSelected = current == "My List") { onNav("My List") }
             CapsuleNavItem(label = "Settings", isSelected = current == "Settings") { onNav("Settings") }
         }
     }
@@ -439,7 +475,7 @@ private fun CapsuleNavItem(label: String, isSelected: Boolean, onClick: () -> Un
             .clip(RoundedCornerShape(50.dp))
             .background(if (active) NetWhite else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 22.dp, vertical = 8.dp),
+            .padding(horizontal = 18.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -513,7 +549,7 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     }
 }
 
-// ---------- True Edge-to-Edge Hero Banner with Overlay Navigation ----------
+// ---------- Full Edge-to-Edge Hero Banner with Floating Navigation ----------
 @Composable
 private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, onOpen: () -> Unit) {
     Box(
@@ -529,11 +565,9 @@ private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, 
                 modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
             )
         }
-        // Gradient overlay blending image into black screen seamlessly
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent, NetBlack), startY = 0f, endY = 540f)))
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 700f)))
         
-        // Hero details at bottom
         Column(
             Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 40.dp).width(650.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -561,7 +595,6 @@ private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, 
             )
         }
 
-        // Navigation bar pinned perfectly to the absolute top over the backdrop
         Box(Modifier.align(Alignment.TopCenter)) {
             NetTopNav(current = currentNav, onNav = onNav)
         }
@@ -616,7 +649,7 @@ private fun HomeScreen(
     }
 }
 
-// ---------- Provider Hub Screen (Minimalist Provider Logo Cards) ----------
+// ---------- Provider Hub Screen ----------
 @Composable
 private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) -> Unit, onNav: (String) -> Unit) {
     val providers = listOf(
@@ -658,6 +691,33 @@ private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) ->
                             Text(prov.second, color = NetMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+// ---------- My List / Watchlist Screen ----------
+@Composable
+private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit, onNav: (String) -> Unit) {
+    Column(Modifier.fillMaxSize()) {
+        NetTopNav(current = "My List", onNav = onNav)
+        
+        Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
+            Text("My Watchlist", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
+            
+            if (watchlist.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("Your watchlist is empty. Add shows or movies to watch later!", color = NetMuted, fontSize = 16.sp)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(150.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(watchlist, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
                 }
             }
         }
@@ -770,6 +830,8 @@ private fun DetailsScreen(
     busy: Boolean,
     resumePos: Long,
     resumeDur: Long,
+    isInWatchlist: Boolean,
+    onToggleWatchlist: () -> Unit,
     onPlay: (Long) -> Unit,
     onPick: (TbFile, Long) -> Unit,
     onBack: () -> Unit
@@ -812,6 +874,7 @@ private fun DetailsScreen(
 
             Spacer(Modifier.height(8.dp))
 
+            // Play / Resume Button
             var playFocused by remember { mutableStateOf(false) }
             Box(
                 modifier = Modifier
@@ -843,6 +906,28 @@ private fun DetailsScreen(
                         fontWeight = FontWeight.Bold
                     )
                 }
+            }
+
+            // Add to Watchlist Button
+            var listFocused by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier
+                    .width(320.dp)
+                    .height(48.dp)
+                    .scale(if (listFocused) 1.04f else 1f)
+                    .onFocusChanged { listFocused = it.isFocused }
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (listFocused) Color(0xFF444444) else Color(0xFF2B2B2B))
+                    .border(if (listFocused) 2.dp else 1.dp, if (listFocused) NetWhite else Color(0x55FFFFFF), RoundedCornerShape(6.dp))
+                    .clickable(onClick = onToggleWatchlist),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (isInWatchlist) "✓ In My List" else "+ Add to My List",
+                    color = NetWhite,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
 
             if (msg.isNotEmpty()) {

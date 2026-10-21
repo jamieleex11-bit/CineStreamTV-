@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -53,14 +54,14 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// ---------- Glassmorphic Netflix Palette ----------
-private val NetBlack = Color(0xFF101010)
+// ---------- Exact Netflix Color Palette ----------
+private val NetBlack = Color(0xFF141414)
 private val NetRed = Color(0xFFE50914)
 private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF999999)
-private val GlassSurface = Color(0x33222222)   // Frosted dark glass
-private val GlassFocus = Color(0x66444444)     // Bright frosted glass on focus
-private val GlassBorder = Color(0x22FFFFFF)    // Subtle light edge glow
+private val GlassSurface = Color(0x44333333)
+private val GlassFocus = Color(0x88555555)
+private val GlassBorder = Color(0x33FFFFFF)
 
 // ---------- Data Models ----------
 data class Film(
@@ -103,19 +104,19 @@ private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileI
 private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
 
 private val demoFilms = listOf(
-    Film("d1", "Money Heist", "2020", "Series", poster("/reEMJA1uzscCbkpeRJeTT2bjqUp.jpg"), "https://image.tmdb.org/t/p/w1280/gYZAHan5CHPFXORBF8xMjUv8UKJ.jpg",
-        "The Professor's plan begins to unravel and the crew must fend off enemies from both inside and outside the Bank of Spain.", "8.3"),
-    Film("d2", "Narcos", "2018", "Series", poster("/rktDFPbfHfUbArZ6OOOKsXcv0Bm.jpg"), "https://image.tmdb.org/t/p/w1280/z0j8cIb3mr9XUo9YdF1jRjW5r8.jpg",
-        "A chronicled look at the criminal exploits of Colombian drug lord Pablo Escobar.", "8.7"),
-    Film("d3", "The Irishman", "2019", "Movie", poster("/mbm8k3GFhXS0ROd9AD1gqYbIFbM.jpg"), "https://image.tmdb.org/t/p/w1280/vhdV2Z7XwYnHCqgsVInxovprXW.jpg",
-        "An old man recalls his time painting houses for his mob family.", "7.8"),
-    Film("d4", "Ozark", "2020", "Series", poster("/m7ahvcoHmUNRB8KTYx9X0x6PqXq.jpg"), "https://image.tmdb.org/t/p/w1280/q7iWw9g3w8e1Y0o4P1S1Q2V6R1y.jpg",
-        "A financial advisor drags his family from Chicago to the Missouri Ozarks.", "8.2")
+    Film("d1", "Griselda", "2024", "Series", poster("/z4nriHz7ioQ0gX9Kj5kX5kX5kX5.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
+        "Inspired by real events, this fictional dramatization shows Griselda Blanco's journey from Medellín to becoming the Godmother.", "7.9"),
+    Film("d2", "Blood & Water", "2023", "Series", poster("/b0PlSFdDwbyK0cf5RxwDpaOJQvQ.jpg"), "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
+        "A Cape Town teen uncovers secrets about her family's past and navigates high school life.", "7.5"),
+    Film("d3", "One Day", "2024", "Series", poster("/kXJQv9GBnYJ0AvkWMe5JGPUlOW5.jpg"), "https://image.tmdb.org/t/p/w1280/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
+        "After spending graduation night together, Emma and Dexter go their separate ways, but their lives remain intertwined.", "8.1"),
+    Film("d4", "Spider-Man: Across the Spider-Verse", "2023", "Movie", poster("/8Vt6mWEReuy4Of61Lnj5Xj704m8.jpg"), "https://image.tmdb.org/t/p/w1280/4HodYYKEIsGOdhrGi2Ud6XGjBn1.jpg",
+        "Miles Morales catapults across the Multiverse, where he encounters a team of Spider-People charged with protecting its very existence.", "8.4")
 )
 
 private val demoRows: List<Pair<String, List<Film>>> = listOf(
-    "Popular on Netflix" to demoFilms,
-    "Trending Now" to demoFilms.reversed()
+    "My List" to demoFilms,
+    "Continue Watching" to demoFilms.reversed()
 )
 
 // ---------- Helpers ----------
@@ -239,14 +240,14 @@ private object Tb {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.statusBarColor = android.graphics.Color.rgb(16, 16, 16)
-        window.navigationBarColor = android.graphics.Color.rgb(16, 16, 16)
-        setContent { NetGlassApp() }
+        window.statusBarColor = android.graphics.Color.rgb(20, 20, 20)
+        window.navigationBarColor = android.graphics.Color.rgb(20, 20, 20)
+        setContent { NetExactApp() }
     }
 }
 
 @Composable
-fun NetGlassApp() {
+fun NetExactApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("netstream", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
@@ -307,9 +308,9 @@ fun NetGlassApp() {
     LaunchedEffect(tmdbKey) {
         if (tmdbKey.isBlank()) { rows = demoRows; return@LaunchedEffect }
         val defs = listOf(
-            RowDef("Popular on Netflix", "/trending/all/week", ""),
-            RowDef("Blockbuster Movies", "/movie/popular", "movie"),
-            RowDef("Bingeworthy Series", "/tv/popular", "tv")
+            RowDef("My List", "/trending/all/week", ""),
+            RowDef("Popular Movies", "/movie/popular", "movie"),
+            RowDef("Popular Series", "/tv/popular", "tv")
         )
         val loaded = ArrayList<Pair<String, List<Film>>>()
         for (d in defs) {
@@ -372,7 +373,7 @@ fun NetGlassApp() {
                 )
             } else {
                 Column(Modifier.fillMaxSize()) {
-                    TopNav(current = screen, onNav = { screen = it })
+                    NetTopNav(current = screen, onNav = { screen = it })
                     when (screen) {
                         "Home" -> HomeScreen(
                             rows = rows, resume = resume, hasTmdb = tmdbKey.isNotBlank(),
@@ -402,41 +403,91 @@ fun NetGlassApp() {
     }
 }
 
-// ---------- Glassmorphic UI Components ----------
+// ---------- 1-to-1 Netflix Top Navigation ----------
 
 @Composable
-private fun TopNav(current: String, onNav: (String) -> Unit) {
+private fun NetTopNav(current: String, onNav: (String) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color(0xEE161616), NetBlack)))
+            .background(NetBlack)
             .padding(horizontal = 48.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(28.dp)
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("N", color = NetRed, fontSize = 32.sp, fontWeight = FontWeight.Black)
-
-        val tabs = listOf("Home", "Search", "Library", "Settings")
-        tabs.forEach { tab ->
-            var focused by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier
-                    .scale(if (focused) 1.05f else 1f)
-                    .onFocusChanged { focused = it.isFocused }
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(if (focused) GlassFocus else GlassSurface)
-                    .border(1.dp, if (focused) NetWhite else GlassBorder, RoundedCornerShape(8.dp))
-                    .clickable { onNav(tab) }
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = tab,
-                    color = if (current == tab) NetWhite else NetMuted,
-                    fontSize = 14.sp,
-                    fontWeight = if (current == tab) FontWeight.Bold else FontWeight.Medium
-                )
-            }
+        // Far Left: Profile Avatar Icon
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .background(Color(0xFF333333)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("👤", fontSize = 14.sp)
         }
+
+        Spacer(Modifier.width(36.dp))
+
+        // Center Nav Items (Search icon[span_1](start_span)[span_1](end_span), Home, Shows, Movies)
+        val navItems = listOf("Home" to "Home", "Search" to "Search", "Shows" to "Home", "Movies" to "Home")
+        
+        // Search Icon[span_2](start_span)[span_2](end_span)
+        NetNavItem(label = "🔍", isSelected = false) { onNav("Search") }
+        Spacer(Modifier.width(24.dp))
+
+        listOf("Home", "Shows", "Movies").forEach { tab ->
+            val screenTarget = if (tab == "Shows" || tab == "Movies") "Home" else tab
+            NetNavItem(label = tab, isSelected = current == screenTarget) { onNav(screenTarget) }
+            Spacer(Modifier.width(24.dp))
+        }
+
+        Spacer(Modifier.weight(1f))
+
+        // "My Netflix" Pill Button (matches screenshot[span_3](start_span)[span_3](end_span))
+        var myNetFocused by remember { mutableStateOf(false) }
+        Box(
+            modifier = Modifier
+                .scale(if (myNetFocused) 1.05f else 1f)
+                .onFocusChanged { myNetFocused = it.isFocused }
+                .clip(RoundedCornerShape(50))
+                .background(if (myNetFocused) GlassFocus else GlassSurface)
+                .border(1.dp, if (myNetFocused) NetWhite else GlassBorder, RoundedCornerShape(50))
+                .clickable { onNav("Library") }
+                .padding(horizontal = 18.dp, vertical = 8.dp)
+        ) {
+            Text("My Netflix", color = NetWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+
+        Spacer(Modifier.width(24.dp))
+
+        // Settings / Profile config shortcut
+        NetNavItem(label = "⚙️", isSelected = current == "Settings") { onNav("Settings") }
+
+        Spacer(Modifier.width(24.dp))
+
+        // Far Right: Netflix 'N' Logo[span_4](start_span)[span_4](end_span)
+        Text("N", color = NetRed, fontSize = 28.sp, fontWeight = FontWeight.Black)
+    }
+}
+
+@Composable
+private fun NetNavItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .scale(if (focused) 1.08f else 1f)
+            .onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (focused) GlassFocus else Color.Transparent)
+            .border(1.dp, if (focused) NetWhite else Color.Transparent, RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
+    ) {
+        Text(
+            text = label,
+            color = if (isSelected || focused) NetWhite else NetMuted,
+            fontSize = 14.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+        )
     }
 }
 
@@ -449,11 +500,11 @@ private fun GlassCard(
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier
-            .scale(if (focused) 1.05f else 1f)
+            .scale(if (focused) 1.06f else 1f)
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(8.dp))
             .background(if (focused) GlassFocus else GlassSurface)
-            .border(1.5.dp, if (focused) NetWhite else GlassBorder, RoundedCornerShape(8.dp))
+            .border(2.dp, if (focused) NetWhite else GlassBorder, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
     ) {
         content(this, focused)
@@ -461,7 +512,7 @@ private fun GlassCard(
 }
 
 @Composable
-private fun NetGlassButton(label: String, primary: Boolean = false, onClick: () -> Unit) {
+private fun NetButton(label: String, primary: Boolean = false, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
@@ -485,34 +536,16 @@ private fun NetGlassButton(label: String, primary: Boolean = false, onClick: () 
 
 @Composable
 private fun PosterCard(film: Film, onClick: () -> Unit) {
-    GlassCard(modifier = Modifier.width(135.dp).height(200.dp), onClick = onClick) {
+    GlassCard(modifier = Modifier.width(140.dp).height(210.dp), onClick = onClick) {
         AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }
 
 @Composable
-private fun ContinueCard(r: Resume, onClick: () -> Unit) {
-    GlassCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
-        if (r.image.isNotEmpty()) {
-            AsyncImage(model = r.image, contentDescription = r.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
-        Text(
-            r.name, color = NetWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
-            modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
-        )
-        val frac = if (r.dur > 0) (r.pos.toFloat() / r.dur.toFloat()).coerceIn(0f, 1f) else 0f
-        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0xFF555555))) {
-            Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(NetRed))
-        }
-    }
-}
-
-@Composable
 private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text(
-            title, color = NetWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+            title, color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
         )
         LazyRow(
@@ -520,40 +553,6 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(list) { f -> PosterCard(f) { onFilm(f) } }
-        }
-    }
-}
-
-@Composable
-private fun HeroBanner(film: Film, onOpen: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(360.dp)) {
-        if (film.backdrop.isNotEmpty()) {
-            AsyncImage(model = film.backdrop, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 120f)))
-        
-        Column(
-            Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 32.dp).width(500.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("N", color = NetRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                Text("SERIES", color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-            }
-            Text(film.name, color = NetWhite, fontSize = 36.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("97% Match", color = Color(0xFF46D369), fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                Text(film.year, color = NetWhite, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                Text("HD", color = NetWhite, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.border(1.dp, GlassBorder, RoundedCornerShape(2.dp)).padding(horizontal = 4.dp, vertical = 1.dp))
-            }
-            
-            Text(film.overview, color = NetWhite, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
-            
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                NetGlassButton("▶ Play", primary = true) { onOpen() }
-                NetGlassButton("ℹ More Info") { onOpen() }
-            }
         }
     }
 }
@@ -567,19 +566,7 @@ private fun HomeScreen(
     onResume: (Resume) -> Unit,
     onSettings: () -> Unit
 ) {
-    val hero = rows.firstOrNull()?.second?.firstOrNull() ?: demoFilms.first()
     LazyColumn(Modifier.fillMaxSize()) {
-        item { HeroBanner(hero) { onFilm(hero) } }
-        if (resume.isNotEmpty()) {
-            item {
-                Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                    Text("Continue Watching", color = NetWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, bottom = 8.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(resume) { r -> ContinueCard(r) { onResume(r) } }
-                    }
-                }
-            }
-        }
         items(rows) { row -> Shelf(row.first, row.second, onFilm) }
         item { Spacer(Modifier.height(32.dp)) }
     }
@@ -602,7 +589,7 @@ private fun SearchScreen(
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         )
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(135.dp),
+            columns = GridCells.Adaptive(140.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
@@ -616,8 +603,8 @@ private fun SearchScreen(
 private fun LibraryScreen(files: List<TbFile>, status: String, loading: Boolean, onRefresh: () -> Unit, onPlay: (TbFile) -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("TorBox Cloud Library", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
-            NetGlassButton("Refresh") { onRefresh() }
+            Text("My Netflix Library", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            NetButton("Refresh") { onRefresh() }
             if (loading) CircularProgressIndicator(color = NetRed, modifier = Modifier.size(20.dp))
         }
         if (status.isNotEmpty()) Text(status, color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(vertical = 8.dp))
@@ -640,14 +627,14 @@ private fun SettingsScreen(
     tmdbKey: String, onTmdb: (String) -> Unit, catalogStatus: String, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text("App Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text("TorBox API Key", color = NetMuted, fontSize = 13.sp)
         OutlinedTextField(
             value = torboxKey, onValueChange = onTorbox, singleLine = true, shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = GlassSurface, unfocusedContainerColor = GlassSurface, focusedBorderColor = NetWhite, unfocusedBorderColor = GlassBorder),
             modifier = Modifier.fillMaxWidth()
         )
-        NetGlassButton("Test TorBox Connection") { onTest() }
+        NetButton("Test TorBox Connection") { onTest() }
         if (tbStatus.isNotEmpty()) Text(tbStatus, color = NetWhite, fontSize = 14.sp)
         
         Text("TMDB API Key (For Catalogs & Posters)", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
@@ -663,7 +650,7 @@ private fun SettingsScreen(
             colors = OutlinedTextFieldDefaults.colors(focusedContainerColor = GlassSurface, unfocusedContainerColor = GlassSurface, focusedBorderColor = NetWhite, unfocusedBorderColor = GlassBorder),
             modifier = Modifier.fillMaxWidth()
         )
-        NetGlassButton("Play Link") { onPlayLink() }
+        NetButton("Play Link") { onPlayLink() }
     }
 }
 
@@ -681,8 +668,8 @@ private fun DetailsScreen(film: Film, msg: String, matches: List<TbFile>, busy: 
                     Text(film.name, color = NetWhite, fontSize = 34.sp, fontWeight = FontWeight.Black)
                     Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 5, lineHeight = 22.sp)
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        NetGlassButton(if (busy) "Loading..." else "▶ Play", primary = true) { if (!busy) onPlay() }
-                        NetGlassButton("Back") { onBack() }
+                        NetButton(if (busy) "Loading..." else "▶ Play", primary = true) { if (!busy) onPlay() }
+                        NetButton("Back") { onBack() }
                     }
                     if (msg.isNotEmpty()) Text(msg, color = NetMuted, fontSize = 14.sp)
                     if (matches.isNotEmpty()) {

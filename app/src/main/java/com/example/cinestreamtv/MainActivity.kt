@@ -379,60 +379,55 @@ fun NetCleanApp() {
     }
 }
 
-// ---------- Centered Clean Top Navigation with Netflix 'N' Logo ----------
+// ---------- Exact 1-to-1 Netflix Capsule Top Navigation Bar ----------
 
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
-    Row(
+    Box(
         Modifier
             .fillMaxWidth()
             .background(NetBlack)
-            .padding(horizontal = 48.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center
     ) {
-        NetNavItem(label = "⌕", isSelected = current == "Search") { onNav("Search") }
-
-        Spacer(Modifier.weight(1f))
-
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(40.dp)) {
-            NetNavItem(label = "Home", isSelected = current == "Home") { onNav("Home") }
-            NetNavItem(label = "Shows", isSelected = current == "Shows") { onNav("Shows") }
-            NetNavItem(label = "Movies", isSelected = current == "Movies") { onNav("Movies") }
-        }
-
-        Spacer(Modifier.weight(1f))
-
-        NetNavItem(label = "⚙️", isSelected = current == "Settings") { onNav("Settings") }
-        Spacer(Modifier.width(28.dp))
-        
-        Box(
+        Row(
             modifier = Modifier
-                .width(28.dp)
-                .height(32.dp)
-                .background(NetRed, RoundedCornerShape(2.dp)),
-            contentAlignment = Alignment.Center
+                .clip(RoundedCornerShape(50.dp))
+                .background(Color(0xFF222222))
+                .border(1.dp, Color(0xFF333333), RoundedCornerShape(50.dp))
+                .padding(horizontal = 6.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Text("N", color = NetWhite, fontSize = 20.sp, fontWeight = FontWeight.Black)
+            CapsuleNavItem(label = "⌕", isSelected = current == "Search") { onNav("Search") }
+            CapsuleNavItem(label = "Home", isSelected = current == "Home") { onNav("Home") }
+            CapsuleNavItem(label = "Shows", isSelected = current == "Shows") { onNav("Shows") }
+            CapsuleNavItem(label = "Movies", isSelected = current == "Movies") { onNav("Movies") }
+            CapsuleNavItem(label = "Settings", isSelected = current == "Settings") { onNav("Settings") }
         }
     }
 }
 
 @Composable
-private fun NetNavItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
+private fun CapsuleNavItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    val active = isSelected || focused
+    
     Box(
         modifier = Modifier
-            .scale(if (focused) 1.12f else 1f)
+            .scale(if (focused) 1.05f else 1f)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(50.dp))
+            .background(if (active) NetWhite else Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .padding(horizontal = 22.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            color = if (isSelected || focused) NetWhite else NetMuted,
-            fontSize = if (label == "⌕") 22.sp else 15.sp,
-            fontWeight = if (isSelected || focused) FontWeight.Bold else FontWeight.Medium
+            color = if (active) Color.Black else NetWhite,
+            fontSize = if (label == "⌕") 18.sp else 14.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }

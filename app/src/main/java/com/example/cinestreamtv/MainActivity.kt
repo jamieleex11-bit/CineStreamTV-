@@ -57,7 +57,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// ---------- Theme Colors ----------
 private val NetBlack = Color(0xFF141414)
 private val NetDarkGray = Color(0xFF1F1F1F)
 private val NetRed = Color(0xFFE50914)
@@ -65,7 +64,6 @@ private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF8C8C8C)
 private val JamieGold = Color(0xFFFFD166)
 
-// ---------- Data Models ----------
 data class Film(
     val id: String,
     val tmdbId: Int,
@@ -100,10 +98,10 @@ data class PlayReq(
     val start: Long
 )
 
-private val Resume.key: String get() = if (torrentId >= 0) "tb\$torrentId:\$fileId" else url
-private val PlayReq.key: String get() = if (torrentId >= 0) "tb\$torrentId:\$fileId" else url
+private val Resume.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
+private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
 
-private fun poster(path: String) = "https://image.tmdb.org/t/p/w500\$path"
+private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
 
 private val demoFilms = listOf(
     Film("d1", 101, "Ted Lasso", "2023", "Series", poster("/kXJQv9GBnYJ0AvkWMe5JGPUlOW5.jpg"),
@@ -118,10 +116,7 @@ private val demoFilms = listOf(
     Film("d4", 104, "Stranger Things", "2022", "Series", poster("/b0PlSFdDwbyK0cf5RxwDpaOJQvQ.jpg"),
         "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
         "When a young boy vanishes, a small town uncovers a mystery.", "8.7", "Netflix")
-)
-
-// ---------- Helpers ----------
-private fun JSONObject.str(k: String): String = if (isNull(k)) "" else optString(k, "")
+)private fun JSONObject.str(k: String): String = if (isNull(k)) "" else optString(k, "")
 private fun norm(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
 
 private val SXE = Regex("""[sS](\d{1,2})[\s._-]?[eE](\d{1,3})""")
@@ -167,4 +162,345 @@ private fun httpGet(urlStr: String, bearer: String? = null): String {
         val code = c.responseCode
         val stream = if (code in 200..299) c.inputStream else c.errorStream
         val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
-        if (code !in 200..299
+        ifif (code !in 200..299) throw Exception("HTTP \$code")
+        return body
+    } finally { c.disconnect() }
+}
+
+private object Tmdb {
+    private const val BASE = "https://api.themoviedb.org/3"
+    private val providers = listOf("Netflix", "Apple TV+", "Disney+", "MAX", "Prime Video")
+
+    private fun call(path: String, key: String): String {
+        val sep = if (path.contains("?")) "&" else "?"
+        return if (key.length > 40) httpGet("\$BASE\$path", key)
+        else httpGet("\$BASE\$path${sep}api_key=$key")
+    }
+
+    private fun toFilm(o: JSONObject, kind: String): Film? {
+        val p = o.str("poster_path")
+        if (p.isEmpty()) return null
+        val id = o.optInt("id")
+        val name = o.str("title").ifEmpty { o.str("name") }
+        val date = o.str("release_date").ifEmpty { o.str("first_air_date") }
+        val b = o.str("backdrop_path")
+        val r = o.optDouble("vote_average", 0.0)
+        return Film(
+            "\$kind\$id", id, name, date.take(4),
+            if (kind == "tv") "Series" else "Movie",
+            poster(p),
+            if (b.isEmpty()) "" else "https://image.tmdb.org/t/p/w1280\$b",
+            o.str("overview"),
+            if (r > 0) (Math.round(r * 10) / 10.0).toString() else "",
+            providers[Math.floorMod(id, providers.size)]
+        )
+    }
+
+    suspend fun catalog(key: String): List<Film> = withContext(Dispatchers.IO) {
+        try {
+            val out = ArrayList<Film>()
+            val seen = HashSet<String>()
+            for (page in 1..5) {
+                val body = call("/trending/all/day?page=\$page", key)
+                val arr = JSONObject(body).optJSONArray("results") ?: continue
+                for (i in 0 until arr.length()) {
+                    val o = arr.getJSONObject(i)
+                    val kind = o.str("media_type")
+                    if (kind != "movie" && kind != "tv") continue
+                    if (!seen.add("\$kind\${o.optInt("id")}")) continue
+                    toFilm(o, kind)?.let { out.add(it) }
+                }
+            }
+            out
+        } catch (e: Exception) { emptyList() }
+    }
+
+    suspend fun search(key: String, query: String): List<Film> = withContext(Dispatchers.IO) {
+        try {
+            val encoded = URLEncoder.encode(query.trim(), "UTF-8")
+            val body = call("/search/multi?query=\$encoded&include_adult=false", key)
+            val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val kind = o.str("media_type")
+                    if (kind != "movie" && kind != "tv") continue
+                    toFilm(o, kind)?.let { add(it) }
+                }
+            }
+        } catch (_: Exception) { emptyList() }
+    }
+}
+
+private object Tb {
+    private const val BASE = "https://api.torbox.app/v1/api"
+    private val VIDEO = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".ts")
+
+    suspend fun library(key: String): Pair<String, List<TbFile>> = withContext(Dispatchers.IO) {
+        try {
+            val body = httpGet("\$BASE/torrents/mylist?limit=100&offset=0", key)
+            val data = JSONObject(body).optJSONArray("data") ?: JSONArray()
+            val out = ArrayList<TbFile>()
+            for (i in 0 until data.length()) {
+                val t = data.getJSONObject(i)
+                val files = t.optJSONArray("files") ?: continue
+                for (j in 0 until files.length()) {
+                    val f = files.getJSONObject(j)
+                    val name = f.str("name")
+                    if (VIDEO.any { name.lowercase().endsWith(it) }) {
+                        out.add(TbFile(t.optInt("id"), f.optInt("id"),
+                            name.substringAfterLast('/'), f.optLong("size")))
+                    }
+                }
+            }
+            Pair("", out)
+        } catch (e: Exception) { Pair("TorBox error.", emptyList()) }
+    }
+
+    suspend fun link(key: String, torrentId: Int, fileId: Int): String? = withContext(Dispatchers.IO) {
+        try {
+            val body = httpGet("$BASE/torrents/requestdl?token=$key&torrent_id=$torrentId&file_id=$fileId&zip_link=false", key)
+            val o = JSONObject(body)
+            if (o.optBoolean("success", false)) o.str("data").ifEmpty { null } else null
+        } catch (e: Exception) { null }
+    }
+
+    suspend fun test(key: String): String = withContext(Dispatchers.IO) {
+        if (key.isBlank()) "Enter API Key" else {
+            try {
+                val o = JSONObject(httpGet("\$BASE/user/me", key))
+                if (o.optBoolean("success", false)) "Connected" else "Invalid Key"
+            } catch (e: Exception) { "Failed" }
+        }
+    }
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        window.statusBarColor = android.graphics.Color.rgb(20, 20, 20)
+        window.navigationBarColor = android.graphics.Color.rgb(20, 20, 20)
+        setContent { NetCleanApp() }
+    }
+}
+
+@Composable
+fun NetCleanApp() {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("netstream", Context.MODE_PRIVATE) }
+    val scope = rememberCoroutineScope()
+
+    var torboxKey by remember { mutableStateOf(prefs.getString("torbox_token", "") ?: "") }
+    var tmdbKey by remember { mutableStateOf(prefs.getString("tmdb_key", "") ?: "") }
+    var screen by remember { mutableStateOf("Home") }
+    var lastBackPressTime by remember { mutableStateOf(0L) }
+    var detail by remember { mutableStateOf<Film?>(null) }
+    var play by remember { mutableStateOf<PlayReq?>(null) }
+    var catalog by remember { mutableStateOf(demoFilms) }
+    var query by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<Film>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+    var library by remember { mutableStateOf<List<TbFile>>(emptyList()) }
+    var libStatus by remember { mutableStateOf("") }
+    var libLoading by remember { mutableStateOf(false) }
+    var tbStatus by remember { mutableStateOf("") }
+    var linkText by remember { mutableStateOf("") }
+    var matches by remember { mutableStateOf<List<TbFile>>(emptyList()) }
+    var detailMsg by remember { mutableStateOf("") }
+    var detailBusy by remember { mutableStateOf(false) }
+    var searchJob by remember { mutableStateOf<Job?>(null) }
+
+    val resume = remember { mutableStateListOf<Resume>().also { it.addAll(loadResume(prefs)) } }
+    val watchlist = remember { mutableStateListOf<Film>().also { list ->
+        try {
+            val saved = JSONArray(prefs.getString("watchlist", "[]"))
+            for (i in 0 until saved.length()) {
+                val o = saved.getJSONObject(i)
+                list.add(Film(o.optString("id"), o.optInt("tmdbId"), o.optString("name"),
+                    o.optString("year"), o.optString("kind"), o.optString("poster"),
+                    o.optString("backdrop"), o.optString("overview"), o.optString("rating"),
+                    o.optString("provider")))
+            }
+        } catch (_: Exception) { }
+    } }
+
+    fun saveWatchlist() {
+        val arr = JSONArray()
+        watchlist.forEach { f ->
+            arr.put(JSONObject().put("id", f.id).put("tmdbId", f.tmdbId).put("name", f.name)
+                .put("year", f.year).put("kind", f.kind).put("poster", f.poster)
+                .put("backdrop", f.backdrop).put("overview", f.overview)
+                .put("rating", f.rating).put("provider", f.provider))
+        }
+        prefs.edit().putString("watchlist", arrfun toggleWatchlist(f: Film) {
+        val index = watchlist.indexOfFirst { it.id == f.id }
+        if (index >= 0) watchlist.removeAt(index) else watchlist.add(0, f)
+        saveWatchlist()
+    }
+
+    suspend fun loadLibrary(): List<TbFile> {
+        if (torboxKey.isBlank()) { libStatus = "Add TorBox API Key."; return emptyList() }
+        libLoading = true
+        return try {
+            val res = Tb.library(torboxKey)
+            library = res.second
+            libStatus = res.first.ifEmpty { if (res.second.isEmpty()) "No TorBox files found." else "" }
+            res.second
+        } finally { libLoading = false }
+    }
+
+    fun open(f: Film) { detail = f; matches = emptyList(); detailMsg = "" }
+
+    fun startTb(f: TbFile, image: String, startPos: Long = 0L) {
+        play = PlayReq(f.name, image, "", f.torrentId, f.fileId, startPos)
+    }
+
+    fun startUrl(u: String, startPos: Long = 0L) {
+        val name = u.substringAfterLast('/').substringBefore('?').ifEmpty { "Stream" }
+        play = PlayReq(name, "", u, -1, -1, startPos)
+    }
+
+    fun report(req: PlayReq, pos: Long, dur: Long) {
+        if (pos < 3000) return
+        val d = if (dur > 0) dur else 0L
+        val finished = d > 0 && pos > d * 0.95
+        val idx = resume.indexOfFirst { it.key == req.key }
+        if (idx >= 0) resume.removeAt(idx)
+        if (!finished) resume.add(0, Resume(req.name, req.image, req.url, req.torrentId, req.fileId, pos, d))
+        while (resume.size > 10) resume.removeAt(resume.size - 1)
+        saveResume(prefs, resume)
+    }
+
+    LaunchedEffect(tmdbKey) {
+        if (tmdbKey.isNotBlank()) {
+            val fetched = Tmdb.catalog(tmdbKey)
+            if (fetched.isNotEmpty()) catalog = fetched
+        }
+    }
+
+    LaunchedEffect(query, tmdbKey) {
+        searchJob?.cancel()
+        if (query.isBlank()) { results = emptyList(); searching = false; return@LaunchedEffect }
+        searching = true
+        searchJob = scope.launch {
+            if (tmdbKey.isBlank()) {
+                results = catalog.filter { it.name.contains(query, true) }
+            } else {
+                delay(300)
+                results = Tmdb.search(tmdbKey, query)
+            }
+            searching = false
+        }
+    }
+
+    BackHandler(enabled = true) {
+        when {
+            play != null -> play = null
+            detail != null -> detail = null
+            screen != "Home" -> screen = "Home"
+            else -> {
+                val now = System.currentTimeMillis()
+                if (now - lastBackPressTime < 2000L) {
+                    (context as? Activity)?.finish()
+                } else {
+                    lastBackPressTime = now
+                    Toast.makeText(context, "Press Back again to exit", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            background = NetBlack, surface = NetDarkGray, primary = NetRed,
+            onBackground = NetWhite, onSurface = NetWhite
+        )
+    ) {
+        Box(Modifier.fillMaxSize().background(NetBlack)) {
+            val p = play
+            val d = detail
+            if (p != null) {
+                PlayerScreen(p, torboxKey) { pos, dur -> report(p, pos, dur) }
+            } else if (d != null) {
+                val matchingResume = resume.firstOrNull { it.name.contains(d.name, true) }
+                DetailsScreen(
+                    film = d, msg = detailMsg, matches = matches, busy = detailBusy,
+                    isInWatchlist = watchlist.any { it.id == d.id },
+                    onToggleWatchlist = { toggleWatchlist(d) },
+                    onEpisodes = {
+                        scope.launch {
+                            detailBusy = true; matches = emptyList()
+                            detailMsg = "Looking for episodes in your TorBox library..."
+                            val loadedFiles = loadLibrary()
+                            val n = norm(d.name)
+                            matches = loadedFiles.filter { n.isNotEmpty() && norm(it.name).contains(n) }
+                            detailMsg = if (matches.isEmpty())
+                                "No matching episodes found in your TorBox library."
+                            else "Choose an episode below."
+                            detailBusy = false
+                        }
+                    },
+                    resumePos = matchingResume?.pos ?: 0L,
+                    resumeDur = matchingResume?.dur ?: 0L,
+                    onPlay = { posToStart ->
+                        scope.launch {
+                            detailBusy = true; matches = emptyList(); detailMsg = ""
+                            val loadedFiles = loadLibrary()
+                            if (torboxKey.isBlank() || loadedFiles.isEmpty()) {
+                                detailMsg = libStatus.ifEmpty { "No TorBox files found." }
+                            } else {
+                                val n = norm(d.name)
+                                val m = loadedFiles.filter { n.isNotEmpty() && norm(it.name).contains(n) }
+                                if (m.isEmpty()) detailMsg = "Not found in TorBox library."
+                                else if (m.size == 1) startTb(m[0], d.backdrop.ifBlank { d.poster }, posToStart)
+                                else matches = m
+                            }
+                            detailBusy = false
+                        }
+                    },
+                    onPick = { f, posToStart -> startTb(f, d.backdrop.ifBlank { d.poster }, posToStart) },
+                    onBack = { detail = null }
+                )
+            } else {
+                Column(Modifier.fillMaxSize()) {
+                    NetTopNav(current = screen, onNav = { screen = it })
+                    when (screen) {
+                        "Home" -> HomeScreen(catalog = catalog, resume = resume,
+                            onFilm = { open(it) },
+                            onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) })
+                        "Shows" -> ProviderFilteredScreen(title = "TV Shows",
+                            catalog = catalog.filter { it.kind == "Series" }, onFilm = { open(it) })
+                        "Movies" -> ProviderFilteredScreen(title = "Movies",
+                            catalog = catalog.filter { it.kind == "Movie" }, onFilm = { open(it) })
+                        "My List" -> ProviderFilteredScreen(title = "My Watchlist",
+                            catalog = watchlist.toList(), onFilm = { open(it) })
+                        "Search" -> SearchScreen(query, { query = it }, results, searching) { open(it) }
+                        "Settings" -> SettingsScreen(
+                            torboxKey = torboxKey,
+                            onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
+                            onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } },
+                            tbStatus = tbStatus,
+                            tmdbKey = tmdbKey,
+                            onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
+                            link = linkText, onLink = { linkText = it },
+                            onPlayLink = {
+                                val directUrl = linkText.trim()
+                                if (directUrl.startsWith("https://", true) || directUrl.startsWith("http://", true)) {
+                                    startUrl(directUrl)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}@Composable
+private fun NetTopNav(current: String, onNav: (String) -> Unit) {
+    Box(
+        Modifier.fillMaxWidth().background(NetBlack).padding(vertical = 16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(R

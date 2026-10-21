@@ -785,7 +785,7 @@ private fun SearchScreen(
             verticalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.fillMaxSize()
         ) {
-            items(results, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
+            items(results, key = { it.id }) { f -> PosterCard(f, onClick = { onFilm(f) }) }
         }
     }
 }

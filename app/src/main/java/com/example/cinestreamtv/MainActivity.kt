@@ -1,4 +1,4 @@
-ackage com.example.cinestreamtv
+package com.example.cinestreamtv
 
 import android.content.Context
 import android.content.SharedPreferences

@@ -48,7 +48,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 
 // ---------- Theme Colors ----------
 private val NetBlack = Color(0xFF141414)
@@ -160,35 +159,42 @@ private object Tmdb {
 
     suspend fun catalog(key: String): List<Film> = withContext(Dispatchers.IO) {
         try {
-            val body = call("/trending/all/week", key)
-            val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
             val out = ArrayList<Film>()
             val providers = listOf("Netflix", " Apple TV+", "Disney+", "MAX", "Prime Video")
             
-            for (i in 0 until arr.length()) {
-                val o = arr.getJSONObject(i)
-                val kind = o.str("media_type")
-                if (kind != "movie" && kind != "tv") continue
-                val p = o.str("poster_path")
-                if (p.isEmpty()) continue
-                val id = o.optInt("id")
-                val name = o.str("title").ifEmpty { o.str("name") }
-                val date = o.str("release_date").ifEmpty { o.str("first_air_date") }
-                val b = o.str("backdrop_path")
-                val r = o.optDouble("vote_average", 0.0)
-                val assignedProvider = providers[id % providers.size]
+            // Fetch multiple pages from trending and popular to build a massive catalog
+            val endpoints = listOf("/trending/all/week?page=1", "/trending/all/week?page=2", "/movie/popular?page=1", "/tv/popular?page=1")
+            
+            for (ep in endpoints) {
+                try {
+                    val body = call(ep, key)
+                    val arr = JSONObject(body).optJSONArray("results") ?: continue
+                    for (i in 0 until arr.length()) {
+                        val o = arr.getJSONObject(i)
+                        val kind = o.str("media_type").ifEmpty { if (ep.contains("movie")) "movie" else "tv" }
+                        if (kind != "movie" && kind != "tv") continue
+                        val p = o.str("poster_path")
+                        if (p.isEmpty()) continue
+                        val id = o.optInt("id")
+                        val name = o.str("title").ifEmpty { o.str("name") }
+                        val date = o.str("release_date").ifEmpty { o.str("first_air_date") }
+                        val b = o.str("backdrop_path")
+                        val r = o.optDouble("vote_average", 0.0)
+                        val assignedProvider = providers[id % providers.size]
 
-                out.add(
-                    Film(
-                        "$kind$id", id, name, date.take(4), if (kind == "tv") "Series" else "Movie",
-                        poster(p), if (b.isEmpty()) "" else "https://image.tmdb.org/t/p/w1280$b",
-                        o.str("overview"), if (r > 0) (Math.round(r * 10) / 10.0).toString() else "",
-                        assignedProvider
-                    )
-                )
+                        out.add(
+                            Film(
+                                "$kind$id", id, name, date.take(4), if (kind == "tv") "Series" else "Movie",
+                                poster(p), if (b.isEmpty()) "" else "https://image.tmdb.org/t/p/w1280$b",
+                                o.str("overview"), if (r > 0) (Math.round(r * 10) / 10.0).toString() else "",
+                                assignedProvider
+                            )
+                        )
+                    }
+                } catch (_: Exception) {}
             }
-            out
-        } catch (e: Exception) { emptyList() }
+            if (out.isEmpty()) demoFilms else out.distinctBy { it.id }
+        } catch (e: Exception) { demoFilms }
     }
 }
 
@@ -252,6 +258,7 @@ fun NetCleanApp() {
     var torboxKey by remember { mutableStateOf(prefs.getString("torbox_token", "") ?: "") }
     var tmdbKey by remember { mutableStateOf(prefs.getString("tmdb_key", "") ?: "") }
     var screen by remember { mutableStateOf("Home") }
+    var selectedProvider by remember { mutableStateOf<String?>(null) }
     var detail by remember { mutableStateOf<Film?>(null) }
     var play by remember { mutableStateOf<PlayReq?>(null) }
     var catalog by remember { mutableStateOf(demoFilms) }
@@ -318,8 +325,10 @@ fun NetCleanApp() {
         searching = false
     }
 
-    BackHandler(enabled = play != null || detail != null) {
-        if (play != null) play = null else detail = null
+    BackHandler(enabled = play != null || detail != null || selectedProvider != null) {
+        if (play != null) play = null
+        else if (detail != null) detail = null
+        else if (selectedProvider != null) selectedProvider = null
     }
 
     MaterialTheme(
@@ -331,6 +340,8 @@ fun NetCleanApp() {
         Box(Modifier.fillMaxSize().background(NetBlack)) {
             val p = play
             val d = detail
+            val prov = selectedProvider
+
             if (p != null) {
                 PlayerScreen(p, torboxKey) { pos, dur -> report(p, pos, dur) }
             } else if (d != null) {
@@ -358,20 +369,29 @@ fun NetCleanApp() {
                     onPick = { f, posToStart -> startTb(f, d.poster, posToStart) },
                     onBack = { detail = null }
                 )
+            } else if (prov != null) {
+                val kindFilter = if (screen == "Shows") "Series" else "Movie"
+                val filtered = catalog.filter { it.provider == prov && it.kind == kindFilter }
+                ProviderCatalogScreen(providerName = prov, kind = kindFilter, catalog = filtered, onFilm = { open(it) }, onBack = { selectedProvider = null })
             } else {
                 Column(Modifier.fillMaxSize()) {
-                    NetTopNav(current = screen, onNav = { screen = it })
                     when (screen) {
-                        "Home" -> HomeScreen(catalog = catalog, resume = resume, onFilm = { open(it) }, onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) })
-                        "Shows" -> ProviderFilteredScreen(title = "TV Shows", catalog = catalog.filter { it.kind == "Series" }, onFilm = { open(it) })
-                        "Movies" -> ProviderFilteredScreen(title = "Movies", catalog = catalog.filter { it.kind == "Movie" }, onFilm = { open(it) })
-                        "Search" -> SearchScreen(query, { query = it }, results, searching) { open(it) }
-                        "Settings" -> SettingsScreen(
-                            torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
-                            onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
-                            tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
-                            link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
-                        )
+                        "Home" -> HomeScreen(catalog = catalog, resume = resume, onFilm = { open(it) }, onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) }, onNav = { screen = it })
+                        "Shows" -> ProviderHubScreen(title = "TV Shows Hub", kind = "Series", onSelect = { selectedProvider = it }, onNav = { screen = it })
+                        "Movies" -> ProviderHubScreen(title = "Movies Hub", kind = "Movie", onSelect = { selectedProvider = it }, onNav = { screen = it })
+                        "Search" -> {
+                            NetTopNav(current = screen, onNav = { screen = it })
+                            SearchScreen(query, { query = it }, results, searching) { open(it) }
+                        }
+                        "Settings" -> {
+                            NetTopNav(current = screen, onNav = { screen = it })
+                            SettingsScreen(
+                                torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
+                                onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
+                                tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
+                                link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
+                            )
+                        }
                     }
                 }
             }
@@ -379,22 +399,21 @@ fun NetCleanApp() {
     }
 }
 
-// ---------- Exact 1-to-1 Netflix Capsule Top Navigation Bar ----------
-
+// ---------- Netflix Capsule Top Navigation Bar ----------
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .background(NetBlack)
-            .padding(vertical = 16.dp),
+            .background(Color.Transparent)
+            .padding(top = 24.dp, bottom = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(50.dp))
-                .background(Color(0xFF222222))
-                .border(1.dp, Color(0xFF333333), RoundedCornerShape(50.dp))
+                .background(Color(0xFF222222).copy(alpha = 0.9f))
+                .border(1.dp, Color(0xFF444444), RoundedCornerShape(50.dp))
                 .padding(horizontal = 6.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -494,13 +513,13 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     }
 }
 
-// ---------- Full Edge-to-Edge Immersive Hero Banner ----------
+// ---------- True Edge-to-Edge Hero Banner with Overlay Navigation ----------
 @Composable
-private fun HeroBanner(film: Film, onOpen: () -> Unit) {
+private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, onOpen: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .height(500.dp)
+            .height(540.dp)
             .background(NetBlack)
             .clickable(onClick = onOpen)
     ) {
@@ -510,9 +529,11 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
                 modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
             )
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 250f)))
+        // Gradient overlay blending image into black screen seamlessly
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent, NetBlack), startY = 0f, endY = 540f)))
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 700f)))
         
+        // Hero details at bottom
         Column(
             Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 40.dp).width(650.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -539,6 +560,11 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
                 overflow = TextOverflow.Ellipsis, lineHeight = 20.sp
             )
         }
+
+        // Navigation bar pinned perfectly to the absolute top over the backdrop
+        Box(Modifier.align(Alignment.TopCenter)) {
+            NetTopNav(current = currentNav, onNav = onNav)
+        }
     }
 }
 
@@ -547,11 +573,12 @@ private fun HomeScreen(
     catalog: List<Film>,
     resume: List<Resume>,
     onFilm: (Film) -> Unit,
-    onResume: (Resume) -> Unit
+    onResume: (Resume) -> Unit,
+    onNav: (String) -> Unit
 ) {
     val hero = catalog.firstOrNull() ?: demoFilms.first()
     
-    val trending = catalog.take(10)
+    val trending = catalog.take(15)
     val appleFilms = catalog.filter { it.provider == " Apple TV+" }
     val disneyFilms = catalog.filter { it.provider == "Disney+" }
     val hboFilms = catalog.filter { it.provider == "MAX" }
@@ -559,7 +586,7 @@ private fun HomeScreen(
     val primeFilms = catalog.filter { it.provider == "Prime Video" }
 
     LazyColumn(Modifier.fillMaxSize()) {
-        item { HeroBanner(hero) { onFilm(hero) } }
+        item { HeroBanner(hero, currentNav = "Home", onNav = onNav, onOpen = { onFilm(hero) }) }
         
         if (resume.isNotEmpty()) {
             item {
@@ -579,7 +606,7 @@ private fun HomeScreen(
         }
 
         item { Shelf("Trending Now", trending, onFilm) }
-        item { Shelf(" Apple TV+ Originals", appleFilms, onFilm) }
+        item { Shelf(" Apple TV+", appleFilms, onFilm) }
         item { Shelf("Disney+ Collection", disneyFilms, onFilm) }
         item { Shelf("MAX (HBO)", hboFilms, onFilm) }
         item { Shelf("Netflix Originals", netflixFilms, onFilm) }
@@ -589,27 +616,89 @@ private fun HomeScreen(
     }
 }
 
+// ---------- Provider Hub Screen (Minimalist Provider Logo Cards) ----------
 @Composable
-private fun ProviderFilteredScreen(title: String, catalog: List<Film>, onFilm: (Film) -> Unit) {
-    val apple = catalog.filter { it.provider == " Apple TV+" }
-    val disney = catalog.filter { it.provider == "Disney+" }
-    val hbo = catalog.filter { it.provider == "MAX" }
-    val netflix = catalog.filter { it.provider == "Netflix" }
-    val prime = catalog.filter { it.provider == "Prime Video" }
+private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) -> Unit, onNav: (String) -> Unit) {
+    val providers = listOf(
+        Triple(" Apple TV+", "Apple TV+ Originals", Color(0xFF111111)),
+        Triple("Disney+", "Disney+ Collection", Color(0xFF113366)),
+        Triple("MAX", "MAX (HBO) Catalog", Color(0xFF331166)),
+        Triple("Netflix", "Netflix Originals", Color(0xFF661111)),
+        Triple("Prime Video", "Prime Video Collection", Color(0xFF115544))
+    )
 
-    LazyColumn(Modifier.fillMaxSize().padding(vertical = 16.dp)) {
-        item {
-            Text(
-                title, color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 48.dp, bottom = 16.dp)
-            )
+    Column(Modifier.fillMaxSize()) {
+        NetTopNav(current = if (kind == "Series") "Shows" else "Movies", onNav = onNav)
+        
+        Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
+            Text(title, color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
+            
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(providers) { prov ->
+                    var focused by remember { mutableStateOf(false) }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp)
+                            .scale(if (focused) 1.04f else 1f)
+                            .onFocusChanged { focused = it.isFocused }
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(prov.third)
+                            .border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(12.dp))
+                            .clickable { onSelect(prov.first) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(prov.first, color = NetWhite, fontSize = 28.sp, fontWeight = FontWeight.Black)
+                            Text(prov.second, color = NetMuted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                    }
+                }
+            }
         }
-        item { Shelf(" Apple TV+", apple, onFilm) }
-        item { Shelf("Disney+", disney, onFilm) }
-        item { Shelf("MAX (HBO)", hbo, onFilm) }
-        item { Shelf("Netflix", netflix, onFilm) }
-        item { Shelf("Prime Video", prime, onFilm) }
-        item { Spacer(Modifier.height(32.dp)) }
+    }
+}
+
+// ---------- Provider Dedicated Catalog Screen ----------
+@Composable
+private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 20.dp)) {
+            var focused by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier
+                    .scale(if (focused) 1.1f else 1f)
+                    .onFocusChanged { focused = it.isFocused }
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(NetDarkGray)
+                    .border(2.dp, if (focused) NetWhite else Color.Transparent, RoundedCornerShape(6.dp))
+                    .clickable(onClick = onBack)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text("← Back", color = NetWhite, fontWeight = FontWeight.Bold)
+            }
+            Text("$providerName $kind", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        }
+
+        if (catalog.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No items found in this category.", color = NetMuted, fontSize = 16.sp)
+            }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(150.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(catalog, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
+            }
+        }
     }
 }
 

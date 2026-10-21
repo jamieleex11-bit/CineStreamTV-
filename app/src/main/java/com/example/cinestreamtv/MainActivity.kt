@@ -29,7 +29,6 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -38,8 +37,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -53,7 +50,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// ---------- Exact Netflix Colors ----------
+// ---------- Netflix Theme Colors ----------
 private val NetBlack = Color(0xFF141414)
 private val NetDarkGray = Color(0xFF1F1F1F)
 private val NetRed = Color(0xFFE50914)
@@ -63,13 +60,15 @@ private val NetMuted = Color(0xFF8C8C8C)
 // ---------- Data Models ----------
 data class Film(
     val id: String,
+    val tmdbId: Int,
     val name: String,
     val year: String,
     val kind: String,
     val poster: String,
     val backdrop: String,
     val overview: String,
-    val rating: String
+    val rating: String,
+    val provider: String // e.g., "Apple TV+", "Disney+", "HBO Max", "Netflix"
 )
 
 data class Resume(
@@ -100,20 +99,20 @@ private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileI
 
 private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
 
+// Fallback demo catalog if TMDB key is not added yet
 private val demoFilms = listOf(
-    Film("d1", "Avatar: The Last Airbender", "2024", "Series", poster("/z4nriHz7ioQ0gX9Kj5kX5kX5kX5.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
-        "A young boy known as the Avatar reawakens to save a world war-torn by the Fire Nation.", "8.1"),
-    Film("d2", "Blood & Water", "2023", "Series", poster("/b0PlSFdDwbyK0cf5RxwDpaOJQvQ.jpg"), "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
-        "A Cape Town teen uncovers secrets about her family's past.", "7.5"),
-    Film("d3", "One Day", "2024", "Series", poster("/kXJQv9GBnYJ0AvkWMe5JGPUlOW5.jpg"), "https://image.tmdb.org/t/p/w1280/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
-        "After spending graduation night together, Emma and Dexter go their separate ways.", "8.1"),
-    Film("d4", "Spider-Man: Across the Spider-Verse", "2023", "Movie", poster("/8Vt6mWEReuy4Of61Lnj5Xj704m8.jpg"), "https://image.tmdb.org/t/p/w1280/4HodYYKEIsGOdhrGi2Ud6XGjBn1.jpg",
-        "Miles Morales catapults across the Multiverse.", "8.4")
+    Film("d1", 101, "Avatar: The Last Airbender", "2024", "Series", poster("/z4nriHz7ioQ0gX9Kj5kX5kX5kX5.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
+        "A young boy known as the Avatar reawakens to save a world war-torn by the Fire Nation.", "8.1", "Netflix"),
+    Film("d2", 102, "Blood & Water", "2023", "Series", poster("/b0PlSFdDwbyK0cf5RxwDpaOJQvQ.jpg"), "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
+        "A Cape Town teen uncovers secrets about her family's past.", "7.5", "Netflix"),
+    Film("d3", 103, "Ted Lasso", "2023", "Series", poster("/kXJQv9GBnYJ0AvkWMe5JGPUlOW5.jpg"), "https://image.tmdb.org/t/p/w1280/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
+        "An American football coach is hired to manage a British soccer team.", "8.6", "Apple TV+"),
+    Film("d4", 104, "Succession", "2023", "Series", poster("/8Vt6mWEReuy4Of61Lnj5Xj704m8.jpg"), "https://image.tmdb.org/t/p/w1280/4HodYYKEIsGOdhrGi2Ud6XGjBn1.jpg",
+        "The Roy family is known for controlling the biggest media and entertainment company in the world.", "8.8", "HBO Max")
 )
 
 private val demoRows: List<Pair<String, List<Film>>> = listOf(
-    "Today's Top Picks for You" to demoFilms,
-    "Continue Watching" to demoFilms.reversed()
+    "Today's Top Picks for You" to demoFilms
 )
 
 // ---------- Helpers ----------
@@ -165,25 +164,33 @@ private object Tmdb {
         val sep = if (path.contains("?")) "&" else "?"
         return if (key.length > 40) httpGet("$BASE$path", key) else httpGet("$BASE$path${sep}api_key=$key")
     }
+
     suspend fun list(path: String, key: String, forceKind: String): List<Film> = withContext(Dispatchers.IO) {
         try {
             val arr = JSONObject(call(path, key)).optJSONArray("results") ?: return@withContext emptyList()
             val out = ArrayList<Film>()
+            val providers = listOf("Netflix", "Apple TV+", "Disney+", "HBO Max", "Prime Video")
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 val kind = if (forceKind.isNotEmpty()) forceKind else o.str("media_type")
                 if (kind != "movie" && kind != "tv") continue
                 val p = o.str("poster_path")
                 if (p.isEmpty()) continue
+                val id = o.optInt("id")
                 val name = o.str("title").ifEmpty { o.str("name") }
                 val date = o.str("release_date").ifEmpty { o.str("first_air_date") }
                 val b = o.str("backdrop_path")
                 val r = o.optDouble("vote_average", 0.0)
+                
+                // Assign a simulated matching streaming provider based on ID for realistic badging
+                val assignedProvider = providers[(id % providers.size)]
+
                 out.add(
                     Film(
-                        "$kind${o.optInt("id")}", name, date.take(4), if (kind == "tv") "Series" else "Movie",
+                        "$kind$id", id, name, date.take(4), if (kind == "tv") "Series" else "Movie",
                         poster(p), if (b.isEmpty()) "" else "https://image.tmdb.org/t/p/w1280$b",
-                        o.str("overview"), if (r > 0) (Math.round(r * 10) / 10.0).toString() else ""
+                        o.str("overview"), if (r > 0) (Math.round(r * 10) / 10.0).toString() else "",
+                        assignedProvider
                     )
                 )
             }
@@ -239,12 +246,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(20, 20, 20)
         window.navigationBarColor = android.graphics.Color.rgb(20, 20, 20)
-        setContent { NetExactApp() }
+        setContent { NetCleanApp() }
     }
 }
 
 @Composable
-fun NetExactApp() {
+fun NetCleanApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("netstream", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
@@ -255,7 +262,6 @@ fun NetExactApp() {
     var detail by remember { mutableStateOf<Film?>(null) }
     var play by remember { mutableStateOf<PlayReq?>(null) }
     var rows by remember { mutableStateOf(demoRows) }
-    var catalogStatus by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Film>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
@@ -303,8 +309,8 @@ fun NetExactApp() {
     LaunchedEffect(tmdbKey) {
         if (tmdbKey.isBlank()) { rows = demoRows; return@LaunchedEffect }
         val defs = listOf(
-            RowDef("Today's Top Picks for You", "/trending/all/week", ""),
-            RowDef("Popular Movies", "/movie/popular", "movie"),
+            RowDef("Trending All", "/trending/all/week", ""),
+            RowDef("Popular Movies (Apple TV+ / HBO / Disney)", "/movie/popular", "movie"),
             RowDef("Popular Series", "/tv/popular", "tv")
         )
         val loaded = ArrayList<Pair<String, List<Film>>>()
@@ -321,7 +327,7 @@ fun NetExactApp() {
         if (tmdbKey.isBlank()) {
             results = demoFilms.filter { it.name.contains(query, true) }
         } else {
-            delay(200)
+            delay(150)
             results = Tmdb.list("/search/multi?query=${URLEncoder.encode(query, "UTF-8")}&include_adult=false", tmdbKey, "")
         }
         searching = false
@@ -359,7 +365,7 @@ fun NetExactApp() {
                             } else {
                                 val n = norm(d.name)
                                 val m = library.filter { n.isNotEmpty() && norm(it.name).contains(n) }
-                                if (m.isEmpty()) detailMsg = "Not found in TorBox."
+                                if (m.isEmpty()) detailMsg = "Not found in TorBox library."
                                 else if (m.size == 1) startTb(m[0], d.poster, posToStart)
                                 else matches = m
                             }
@@ -390,7 +396,6 @@ fun NetExactApp() {
                             tbStatus = tbStatus,
                             tmdbKey = tmdbKey,
                             onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
-                            catalogStatus = catalogStatus,
                             link = linkText, onLink = { linkText = it },
                             onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
                         )
@@ -401,7 +406,7 @@ fun NetExactApp() {
     }
 }
 
-// ---------- Clean 1-to-1 Netflix Top Navigation ----------
+// ---------- Clean Flat Top Nav ----------
 
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
@@ -409,40 +414,24 @@ private fun NetTopNav(current: String, onNav: (String) -> Unit) {
         Modifier
             .fillMaxWidth()
             .background(NetBlack)
-            .padding(horizontal = 48.dp, vertical = 16.dp),
+            .padding(horizontal = 48.dp, vertical = 18.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         NetNavItem(label = "🔍", isSelected = current == "Search") { onNav("Search") }
-        Spacer(Modifier.width(32.dp))
+        Spacer(Modifier.width(36.dp))
 
         NetNavItem(label = "Home", isSelected = current == "Home") { onNav("Home") }
-        Spacer(Modifier.width(32.dp))
+        Spacer(Modifier.width(36.dp))
         NetNavItem(label = "Shows", isSelected = false) { onNav("Home") }
-        Spacer(Modifier.width(32.dp))
+        Spacer(Modifier.width(36.dp))
         NetNavItem(label = "Movies", isSelected = false) { onNav("Home") }
-        Spacer(Modifier.width(32.dp))
+        Spacer(Modifier.width(36.dp))
         NetNavItem(label = "Games", isSelected = false) { onNav("Home") }
 
         Spacer(Modifier.weight(1f))
 
-        // "My Netflix" Pill Button
-        var myNetFocused by remember { mutableStateOf(false) }
-        Box(
-            modifier = Modifier
-                .scale(if (myNetFocused) 1.05f else 1f)
-                .onFocusChanged { myNetFocused = it.isFocused }
-                .clip(RoundedCornerShape(50))
-                .background(if (myNetFocused) Color(0xFF3B3B3B) else NetDarkGray)
-                .border(if (myNetFocused) 1.5.dp else 0.dp, NetWhite, RoundedCornerShape(50))
-                .clickable { onNav("Library") }
-                .padding(horizontal = 20.dp, vertical = 8.dp)
-        ) {
-            Text("My Netflix", color = NetWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        }
-
-        Spacer(Modifier.width(32.dp))
         NetNavItem(label = "⚙️", isSelected = current == "Settings") { onNav("Settings") }
-        Spacer(Modifier.width(32.dp))
+        Spacer(Modifier.width(36.dp))
         Text("N", color = NetRed, fontSize = 28.sp, fontWeight = FontWeight.Black)
     }
 }
@@ -452,18 +441,17 @@ private fun NetNavItem(label: String, isSelected: Boolean, onClick: () -> Unit) 
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
-            .scale(if (focused) 1.05f else 1f)
+            .scale(if (focused) 1.12f else 1f)
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(4.dp))
-            .background(Color.Transparent)
             .clickable(onClick = onClick)
-            .padding(horizontal = 4.dp, vertical = 4.dp)
+            .padding(horizontal = 6.dp, vertical = 4.dp)
     ) {
         Text(
             text = label,
             color = if (isSelected || focused) NetWhite else NetMuted,
-            fontSize = 14.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+            fontSize = 15.sp,
+            fontWeight = if (isSelected || focused) FontWeight.Bold else FontWeight.Medium
         )
     }
 }
@@ -496,6 +484,24 @@ private fun PosterCard(film: Film, onClick: () -> Unit) {
 }
 
 @Composable
+private fun ResumeCard(r: Resume, onClick: () -> Unit) {
+    NetCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
+        if (r.image.isNotEmpty()) {
+            AsyncImage(model = r.image, contentDescription = r.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        }
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xCC000000)))))
+        Text(
+            r.name, color = NetWhite, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 12.dp, end = 12.dp, bottom = 12.dp)
+        )
+        val frac = if (r.dur > 0) (r.pos.toFloat() / r.dur.toFloat()).coerceIn(0f, 1f) else 0f
+        Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(4.dp).background(Color(0xFF555555))) {
+            Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(NetRed))
+        }
+    }
+}
+
+@Composable
 private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
         Text(
@@ -511,7 +517,6 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     }
 }
 
-// ---------- Clean Netflix Feature Showcase Hero Banner (Matches Reference[span_6](start_span)[span_6](end_span)) ----------
 @Composable
 private fun HeroBanner(film: Film, onOpen: () -> Unit) {
     Box(
@@ -520,6 +525,7 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
             .height(380.dp)
             .padding(horizontal = 48.dp, vertical = 12.dp)
             .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onOpen)
     ) {
         if (film.backdrop.isNotEmpty()) {
             AsyncImage(model = film.backdrop, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
@@ -531,26 +537,21 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("N", color = NetRed, fontSize = 13.sp, fontWeight = FontWeight.Black)
-                Text("SERIES", color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Text("STREAMING ON", color = NetMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
+                Box(Modifier.background(NetRed, RoundedCornerShape(2.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    Text(film.provider, color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
             }
             Text(film.name, color = NetWhite, fontSize = 32.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
             
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Family Time TV", color = NetMuted, fontSize = 12.sp)
-                Text("•", color = NetMuted)
                 Text(film.year, color = NetMuted, fontSize = 12.sp)
                 Text("•", color = NetMuted)
-                Text("8 Episodes", color = NetMuted, fontSize = 12.sp)
-                Text("•", color = NetMuted)
-                Text("TV-PG", color = NetMuted, fontSize = 11.sp, modifier = Modifier.border(1.dp, NetMuted, RoundedCornerShape(2.dp)).padding(horizontal = 3.dp))
-            }
-            
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-                Box(Modifier.background(NetRed, RoundedCornerShape(2.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                    Text("Top 10 #2 in TV Shows", color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text(film.kind, color = NetMuted, fontSize = 12.sp)
+                if (film.rating.isNotEmpty()) {
+                    Text("•", color = NetMuted)
+                    Text("★ ${film.rating}", color = Color(0xFF46D369), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
-                Text("★ Starring cast & crew info", color = NetWhite, fontSize = 12.sp)
             }
         }
     }
@@ -568,6 +569,24 @@ private fun HomeScreen(
     val hero = rows.firstOrNull()?.second?.firstOrNull() ?: demoFilms.first()
     LazyColumn(Modifier.fillMaxSize()) {
         item { HeroBanner(hero) { onFilm(hero) } }
+        
+        if (resume.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
+                    Text(
+                        "Continue Watching", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+                    )
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 48.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(resume) { r -> ResumeCard(r) { onResume(r) } }
+                    }
+                }
+            }
+        }
+
         items(rows) { row -> Shelf(row.first, row.second, onFilm) }
         item { Spacer(Modifier.height(32.dp)) }
     }
@@ -625,7 +644,7 @@ private fun LibraryScreen(files: List<TbFile>, status: String, loading: Boolean,
 @Composable
 private fun SettingsScreen(
     torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: String,
-    tmdbKey: String, onTmdb: (String) -> Unit, catalogStatus: String, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
+    tmdbKey: String, onTmdb: (String) -> Unit, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("App Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -684,10 +703,20 @@ private fun DetailsScreen(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 56.dp, vertical = 48.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Streaming Provider Badge Header
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Streams on:", color = NetMuted, fontSize = 14.sp)
+                Box(Modifier.background(NetRed, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+                    Text(film.provider, color = NetWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+
             Text(film.name, color = NetWhite, fontSize = 42.sp, fontWeight = FontWeight.Black)
 
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("77%", color = Color(0xFF46D369), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                if (film.rating.isNotEmpty()) {
+                    Text("★ ${film.rating}", color = Color(0xFF46D369), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                }
                 Text(film.year, color = NetWhite, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 Text(film.kind, color = NetMuted, fontSize = 15.sp)
             }
@@ -696,7 +725,6 @@ private fun DetailsScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            // Netflix Resume / Play Action Button with Progress Bar
             var playFocused by remember { mutableStateOf(false) }
             Box(
                 modifier = Modifier
@@ -736,7 +764,7 @@ private fun DetailsScreen(
 
             if (matches.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
-                Text("Select File Variant:", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text("Select File Variant from TorBox:", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 matches.forEach { f ->
                     NetCard(modifier = Modifier.fillMaxWidth(), onClick = { onPick(f, resumePos) }) {
                         Text(f.name + " (" + fmtSize(f.size) + ")", color = NetWhite, fontSize = 14.sp, modifier = Modifier.padding(16.dp))

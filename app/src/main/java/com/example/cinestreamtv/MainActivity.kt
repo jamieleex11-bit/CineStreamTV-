@@ -1159,8 +1159,45 @@ class AppViewModel(
                     it.copy(
                         files = files,
                         isLoading = false,
-                        status =
-                        class MainActivity : ComponentActivity() {
+                        status = if (files.isEmpty()) {
+                            "No video files were found in your TorBox library."
+                        } else {
+                            ""
+                        }
+                    )
+                }
+            }
+            .onFailure { error ->
+                _library.update {
+                    it.copy(
+                        isLoading = false,
+                        status = readableError(
+                            error = error,
+                            fallback = "Could not load your TorBox library."
+                        )
+                    )
+                }
+            }
+    }
+
+    private fun readableError(
+        error: Throwable,
+        fallback: String
+    ): String {
+        return when (error) {
+            is Http.HttpException -> {
+                "$fallback (HTTP ${error.statusCode})"
+            }
+
+            is IllegalStateException -> {
+                error.message ?: fallback
+            }
+
+            else -> fallback
+        }
+    }
+}
+class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -2447,3 +2484,386 @@ private fun DetailsScreen(
                 hasProgress = hasProgress,
                 progress = progress,
                 isLoading = state.isLoading,
+                onClick = {
+                    onPlay(state.resumePositionMs)
+                }
+            )
+
+            ActionPillButton(
+                label = if (film.kind == "Series") {
+                    "Episodes"
+                } else {
+                    "Find in TorBox"
+                },
+                onClick = onFindFiles
+            )
+
+            ActionPillButton(
+                label = if (isInWatchlist) {
+                    "✓ Added to My List"
+                } else {
+                    "+ Add to My List"
+                },
+                onClick = onToggleWatchlist
+            )
+
+            if (state.message.isNotBlank()) {
+                Text(
+                    text = state.message,
+                    color = NetMuted,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            if (state.matches.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "Select a file from TorBox",
+                    color = NetWhite,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                state.matches.forEach { file ->
+                    FocusableCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            onPickFile(
+                                file,
+                                state.resumePositionMs
+                            )
+                        }
+                    ) {
+                        Text(
+                            text = "${file.name} " +
+                                "(${formatFileSize(file.size)})",
+                            color = NetWhite,
+                            fontSize = 14.sp,
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(32.dp))
+        }
+    }
+}
+
+@Composable
+private fun PlayButton(
+    hasProgress: Boolean,
+    progress: Float,
+    isLoading: Boolean,
+    onClick: () -> Unit
+) {
+    var isFocused by remember {
+        mutableStateOf(false)
+    }
+
+    Box(
+        modifier = Modifier
+            .width(320.dp)
+            .height(52.dp)
+            .tvFocusable(
+                isFocused = isFocused,
+                focusedScale = 1.04f,
+                showBorder = false,
+                onFocusChanged = { focused ->
+                    isFocused = focused
+                }
+            )
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (isFocused) NetWhite else Color(0xFFE5E5E5)
+            )
+            .clickable(
+                enabled = !isLoading,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        if (hasProgress) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFFB0B0B0))
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .fillMaxHeight()
+                    .background(Color(0xFF8C8C8C))
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "▶",
+                color = Color.Black,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = when {
+                    isLoading -> "Loading..."
+                    hasProgress -> "Resume"
+                    else -> "Play"
+                },
+                color = Color.Black,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsScreen(
+    state: SettingsUiState,
+    onTorboxKeyChange: (String) -> Unit,
+    onTmdbKeyChange: (String) -> Unit,
+    onDirectLinkChange: (String) -> Unit,
+    onTestTorbox: () -> Unit,
+    onPlayDirectLink: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(
+                horizontal = 48.dp,
+                vertical = 16.dp
+            ),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "App Settings",
+            color = NetWhite,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Text(
+            text = "TorBox API Key",
+            color = NetMuted,
+            fontSize = 13.sp
+        )
+
+        OutlinedTextField(
+            value = state.torboxKey,
+            onValueChange = onTorboxKeyChange,
+            singleLine = true,
+            shape = RoundedCornerShape(6.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = NetDarkGray,
+                unfocusedContainerColor = NetDarkGray,
+                focusedBorderColor = NetWhite,
+                unfocusedBorderColor = Color(0x33FFFFFF)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        ActionPillButton(
+            label = "Test TorBox Connection",
+            onClick = onTestTorbox
+        )
+
+        if (state.torboxStatus.isNotBlank()) {
+            Text(
+                text = state.torboxStatus,
+                color = NetWhite,
+                fontSize = 14.sp
+            )
+        }
+
+        Text(
+            text = "TMDB API Key",
+            color = NetMuted,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(top = 10.dp)
+        )
+
+        OutlinedTextField(
+            value = state.tmdbKey,
+            onValueChange = onTmdbKeyChange,
+            singleLine = true,
+            shape = RoundedCornerShape(6.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = NetDarkGray,
+                unfocusedContainerColor = NetDarkGray,
+                focusedBorderColor = NetWhite,
+                unfocusedBorderColor = Color(0x33FFFFFF)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Text(
+            text = "Direct Stream Link",
+            color = NetMuted,
+            fontSize = 13.sp,
+            modifier = Modifier.padding(top = 10.dp)
+        )
+
+        OutlinedTextField(
+            value = state.directLink,
+            onValueChange = onDirectLinkChange,
+            singleLine = true,
+            shape = RoundedCornerShape(6.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedContainerColor = NetDarkGray,
+                unfocusedContainerColor = NetDarkGray,
+                focusedBorderColor = NetWhite,
+                unfocusedBorderColor = Color(0x33FFFFFF)
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        ActionPillButton(
+            label = "Play Link",
+            onClick = onPlayDirectLink
+        )
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        Text(
+            text = "Made by Jamie",
+            color = JamieGold,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 24.dp)
+        )
+    }
+}
+
+@Composable
+private fun PlayerScreen(
+    request: PlayRequest,
+    torboxKey: String,
+    onProgress: (Long, Long) -> Unit
+) {
+    val context = LocalContext.current
+
+    var streamUrl by remember(request) {
+        mutableStateOf(request.url)
+    }
+
+    var errorMessage by remember(request) {
+        mutableStateOf("")
+    }
+
+    LaunchedEffect(request, torboxKey) {
+        if (streamUrl.isBlank() && request.torrentId >= 0) {
+            TorBoxRepository.requestStreamLink(
+                apiKey = torboxKey,
+                torrentId = request.torrentId,
+                fileId = request.fileId
+            ).fold(
+                onSuccess = { link ->
+                    streamUrl = link
+                },
+                onFailure = { error ->
+                    errorMessage = error.message
+                        ?: "Failed to fetch the stream link."
+                }
+            )
+        }
+    }
+
+    if (streamUrl.isBlank()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            if (errorMessage.isBlank()) {
+                CircularProgressIndicator(color = NetRed)
+            } else {
+                Text(
+                    text = errorMessage,
+                    color = NetWhite,
+                    fontSize = 16.sp
+                )
+            }
+        }
+
+        return
+    }
+
+    val exoPlayer = remember(streamUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(streamUrl))
+
+            if (request.startPositionMs > 5_000L) {
+                seekTo(request.startPositionMs)
+            }
+
+            prepare()
+            playWhenReady = true
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying) {
+                    onProgress(
+                        exoPlayer.currentPosition,
+                        exoPlayer.duration
+                    )
+                }
+            }
+        }
+
+        exoPlayer.addListener(listener)
+
+        onDispose {
+            onProgress(
+                exoPlayer.currentPosition,
+                exoPlayer.duration
+            )
+
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        AndroidView(
+            factory = { viewContext ->
+                PlayerView(viewContext).apply {
+                    player = exoPlayer
+                    useController = true
+                    isFocusable = true
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    requestFocus()
+                }
+            },
+            update = { playerView ->
+                playerView.player = exoPlayer
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}

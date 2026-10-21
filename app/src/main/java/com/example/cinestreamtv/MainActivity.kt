@@ -302,6 +302,7 @@ private class AppStorage(
         const val KEY_TMDB = "tmdb_key"
     }
 }
+
 private object Http {
 
     class HttpException(
@@ -543,7 +544,7 @@ private object TorBoxRepository {
                         files.add(
                             TbFile(
                                 torrentId = torrentId,
-                                fileId = file.optInt("fileId", -1),
+                                fileId = file.optInt("id", -1),
                                 name = fileName.substringAfterLast('/'),
                                 size = file.optLong("size", 0L)
                             )
@@ -599,6 +600,7 @@ private object TorBoxRepository {
         }
     }
 }
+
 class AppViewModel(
     private val storage: AppStorage
 ) : ViewModel() {
@@ -1197,8 +1199,12 @@ class AppViewModel(
         }
     }
 }
+
+class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         window.statusBarColor = android.graphics.Color.rgb(20, 20, 20)
         window.navigationBarColor = android.graphics.Color.rgb(20, 20, 20)
 

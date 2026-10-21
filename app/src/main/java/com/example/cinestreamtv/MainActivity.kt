@@ -1,4 +1,3 @@
-Kotlin
 package com.example.cinestreamtv
 
 import android.content.Context

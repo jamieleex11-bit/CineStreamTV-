@@ -53,12 +53,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// ---------- Netflix UI Theme Colors ----------
+// ---------- Modern Netflix TV Color Palette ----------
 private val NetBlack = Color(0xFF141414)
-private val NetDarkGray = Color(0xFF1F1F1F)
+private val NetSurface = Color(0xFF1B1B1B)
+private val NetFocus = Color(0xFF2B2B2B)
 private val NetRed = Color(0xFFE50914)
 private val NetWhite = Color(0xFFFFFFFF)
-private val NetMuted = Color(0xFFB3B3B3)
+private val NetMuted = Color(0xFF8C8C8C)
 
 // ---------- Data Models ----------
 data class Film(
@@ -108,15 +109,12 @@ private val demoFilms = listOf(
     Film("d3", "Interstellar", "2014", "Movie", poster("/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg"), "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
         "A team travels beyond this galaxy to discover whether mankind has a future among the stars.", "8.6"),
     Film("d4", "Dune: Part Two", "2024", "Movie", poster("/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
-        "Paul Atreides unites with Chani and the Fremen while seeking revenge.", "8.3"),
-    Film("d5", "The Batman", "2022", "Movie", poster("/74xTEgt7R36Fpooo50r9T25onhq.jpg"), "https://image.tmdb.org/t/p/w1280/b0PlSFdDwbyK0cf5RxwDpaOJQvQ.jpg",
-        "A detective uncovers corruption in Gotham City that connects to his own family.", "7.8")
+        "Paul Atreides unites with Chani and the Fremen while seeking revenge.", "8.3")
 )
 
 private val demoRows: List<Pair<String, List<Film>>> = listOf(
     "Trending Now" to demoFilms,
-    "TV Shows & Movies You've Liked" to demoFilms.reversed(),
-    "Blockbuster Hits" to demoFilms
+    "Continue Watching & Favorites" to demoFilms.reversed()
 )
 
 // ---------- Helpers ----------
@@ -340,7 +338,7 @@ fun NetStreamApp() {
 
     MaterialTheme(
         colorScheme = darkColorScheme(
-            background = NetBlack, surface = NetDarkGray, primary = NetRed,
+            background = NetBlack, surface = NetSurface, primary = NetRed,
             onBackground = NetWhite, onSurface = NetWhite
         )
     ) {
@@ -403,23 +401,23 @@ fun NetStreamApp() {
     }
 }
 
-// ---------- UI Components (Netflix Layout Styling) ----------
+// ---------- Modern Streamlined Components (Rounded & Smooth) ----------
 
 @Composable
-private fun FocusableCard(
+private fun ModernCard(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(4.dp),
+    shape: Shape = RoundedCornerShape(10.dp), // Modern softer curved cards
     onClick: () -> Unit,
     content: @Composable BoxScope.(Boolean) -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier
-            .scale(if (focused) 1.08f else 1f)
+            .scale(if (focused) 1.06f else 1f)
             .onFocusChanged { focused = it.isFocused }
             .clip(shape)
-            .background(NetDarkGray)
-            .then(if (focused) Modifier.border(3.dp, NetWhite, shape) else Modifier)
+            .background(if (focused) NetFocus else NetSurface)
+            .then(if (focused) Modifier.border(2.5.dp, NetWhite, shape) else Modifier)
             .clickable(onClick = onClick)
     ) {
         content(this, focused)
@@ -431,20 +429,20 @@ private fun NetButton(label: String, primary: Boolean = false, onClick: () -> Un
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
-            .scale(if (focused) 1.05f else 1f)
+            .scale(if (focused) 1.04f else 1f)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(4.dp))
-            .background(if (primary) NetWhite else Color(0x66808080))
-            .then(if (focused) Modifier.border(2.dp, NetWhite, RoundedCornerShape(4.dp)) else Modifier)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (primary) NetWhite else Color(0x55808080))
+            .then(if (focused) Modifier.border(2.dp, NetWhite, RoundedCornerShape(8.dp)) else Modifier)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
             color = if (primary) Color.Black else NetWhite,
-            fontSize = 16.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
+            modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp)
         )
     }
 }
@@ -454,9 +452,9 @@ private fun TopNav(current: String, onNav: (String) -> Unit) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(24.dp)
+        horizontalArrangement = Arrangement.spacedBy(28.dp)
     ) {
-        Text("N", color = NetRed, fontSize = 32.sp, fontWeight = FontWeight.Black)
+        Text("N", color = NetRed, fontSize = 30.sp, fontWeight = FontWeight.Black)
         listOf("Home", "Search", "Library", "Settings").forEach { tab ->
             var focused by remember { mutableStateOf(false) }
             Box(
@@ -479,14 +477,14 @@ private fun TopNav(current: String, onNav: (String) -> Unit) {
 
 @Composable
 private fun PosterCard(film: Film, onClick: () -> Unit) {
-    FocusableCard(modifier = Modifier.width(135.dp).height(200.dp), onClick = onClick) {
+    ModernCard(modifier = Modifier.width(135.dp).height(200.dp), onClick = onClick) {
         AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }
 
 @Composable
 private fun ContinueCard(r: Resume, onClick: () -> Unit) {
-    FocusableCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
+    ModernCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
         if (r.image.isNotEmpty()) {
             AsyncImage(model = r.image, contentDescription = r.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
@@ -506,12 +504,12 @@ private fun ContinueCard(r: Resume, onClick: () -> Unit) {
 private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text(
-            title, color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+            title, color = NetWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
         )
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(list) { f -> PosterCard(f) { onFilm(f) } }
         }
@@ -520,11 +518,11 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
 
 @Composable
 private fun HeroBanner(film: Film, onOpen: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(360.dp)) {
+    Box(Modifier.fillMaxWidth().height(350.dp)) {
         if (film.backdrop.isNotEmpty()) {
             AsyncImage(model = film.backdrop, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 150f)))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 120f)))
         
         Column(
             Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 32.dp).width(500.dp),
@@ -534,7 +532,7 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
                 Text("N", color = NetRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
                 Text("SERIES", color = NetWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
             }
-            Text(film.name, color = NetWhite, fontSize = 36.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(film.name, color = NetWhite, fontSize = 34.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(film.overview, color = NetWhite, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 NetButton("▶ Play", primary = true) { onOpen() }
@@ -559,8 +557,8 @@ private fun HomeScreen(
         if (resume.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text("Continue Watching", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, bottom = 8.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Continue Watching", color = NetWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, bottom = 8.dp))
+                    LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(resume) { r -> ContinueCard(r) { onResume(r) } }
                     }
                 }
@@ -579,14 +577,15 @@ private fun SearchScreen(
         OutlinedTextField(
             value = query, onValueChange = onQuery, singleLine = true,
             label = { Text("Search title...") },
+            shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = NetWhite, unfocusedTextColor = NetWhite, focusedBorderColor = NetWhite),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 8.dp)
         )
         LazyVerticalGrid(
             columns = GridCells.Adaptive(135.dp),
             contentPadding = PaddingValues(horizontal = 48.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
         ) {
             items(results) { f -> PosterCard(f) { onFilm(f) } }
@@ -605,7 +604,7 @@ private fun LibraryScreen(files: List<TbFile>, status: String, loading: Boolean,
         if (status.isNotEmpty()) Text(status, color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(vertical = 8.dp))
         LazyColumn(contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
             items(files) { f ->
-                FocusableCard(modifier = Modifier.fillMaxWidth(), onClick = { onPlay(f) }) {
+                ModernCard(modifier = Modifier.fillMaxWidth(), onClick = { onPlay(f) }) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(f.name, color = NetWhite, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
                         Text(fmtSize(f.size), color = NetMuted, fontSize = 13.sp)
@@ -624,15 +623,15 @@ private fun SettingsScreen(
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text("TorBox API Key", color = NetMuted, fontSize = 14.sp)
-        OutlinedTextField(value = torboxKey, onValueChange = onTorbox, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = torboxKey, onValueChange = onTorbox, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
         NetButton("Test TorBox Connection") { onTest() }
         if (tbStatus.isNotEmpty()) Text(tbStatus, color = NetWhite, fontSize = 14.sp)
         
         Text("TMDB API Key (For Catalogs & Posters)", color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
-        OutlinedTextField(value = tmdbKey, onValueChange = onTmdb, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = tmdbKey, onValueChange = onTmdb, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
         
         Text("Direct Stream Link", color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
-        OutlinedTextField(value = link, onValueChange = onLink, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = link, onValueChange = onLink, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
         NetButton("Play Link") { onPlayLink() }
     }
 }
@@ -646,7 +645,7 @@ private fun DetailsScreen(film: Film, msg: String, matches: List<TbFile>, busy: 
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.9f), NetBlack.copy(alpha = 0.3f)))))
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 40.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.width(180.dp).height(270.dp).clip(RoundedCornerShape(4.dp)), contentScale = ContentScale.Crop)
+                AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.width(180.dp).height(270.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(film.name, color = NetWhite, fontSize = 34.sp, fontWeight = FontWeight.Black)
                     Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 5, lineHeight = 22.sp)
@@ -658,7 +657,7 @@ private fun DetailsScreen(film: Film, msg: String, matches: List<TbFile>, busy: 
                     if (matches.isNotEmpty()) {
                         Text("Select File Variant:", color = NetWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         matches.forEach { f ->
-                            FocusableCard(modifier = Modifier.fillMaxWidth(), onClick = { onPick(f) }) {
+                            ModernCard(modifier = Modifier.fillMaxWidth(), onClick = { onPick(f) }) {
                                 Text(f.name + " (" + fmtSize(f.size) + ")", color = NetWhite, fontSize = 14.sp, modifier = Modifier.padding(14.dp))
                             }
                         }

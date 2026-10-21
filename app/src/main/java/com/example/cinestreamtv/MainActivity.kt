@@ -405,26 +405,27 @@ fun NetCleanApp() {
             } else if (prov != null) {
                 val kindFilter = if (screen == "Shows") "Series" else "Movie"
                 val filtered = catalog.filter { it.provider == prov && it.kind == kindFilter }
-                ProviderCatalogScreen(providerName = prov, kind = kindFilter, catalog = filtered, onFilm = { open(it) }, onBack = { selectedProvider = null })
+                ProviderCatalogScreen(providerName = prov, kind = kindFilter, catalog = filtered, onFilm = { open(it) }, onBack = { selectedProvider = null }, currentNav = screen, onNav = { screen = it; selectedProvider = null })
             } else {
-                Column(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize()) {
                     when (screen) {
                         "Home" -> HomeScreen(catalog = catalog, resume = resume, onFilm = { open(it) }, onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) }, onNav = { screen = it })
                         "Shows" -> ProviderHubScreen(title = "TV Shows Hub", kind = "Series", onSelect = { selectedProvider = it }, onNav = { screen = it })
                         "Movies" -> ProviderHubScreen(title = "Movies Hub", kind = "Movie", onSelect = { selectedProvider = it }, onNav = { screen = it })
                         "My List" -> MyListScreen(watchlist = watchlist, onFilm = { open(it) }, onNav = { screen = it })
-                        "Search" -> {
-                            NetTopNav(current = screen, onNav = { screen = it })
-                            SearchScreen(query, { query = it }, results, searching) { open(it) }
-                        }
-                        "Settings" -> {
-                            NetTopNav(current = screen, onNav = { screen = it })
-                            SettingsScreen(
-                                torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
-                                onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
-                                tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
-                                link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
-                            )
+                        "Search" -> SearchScreen(query, { query = it }, results, searching) { open(it) }
+                        "Settings" -> SettingsScreen(
+                            torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
+                            onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
+                            tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
+                            link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
+                        )
+                    }
+
+                    // Persistent floating top navigation bar across all screens
+                    if (screen != "Home") {
+                        Box(Modifier.align(Alignment.TopCenter)) {
+                            NetTopNav(current = screen, onNav = { screen = it; selectedProvider = null })
                         }
                     }
                 }
@@ -659,9 +660,7 @@ private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) ->
         Triple("Prime Video", "Prime Video Collection", Color(0xFF115544))
     )
 
-    Column(Modifier.fillMaxSize()) {
-        NetTopNav(current = if (kind == "Series") "Shows" else "Movies", onNav = onNav)
-        
+    Column(Modifier.fillMaxSize().padding(top = 80.dp)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
             Text(title, color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
             
@@ -699,9 +698,7 @@ private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) ->
 // ---------- My List / Watchlist Screen ----------
 @Composable
 private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit, onNav: (String) -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        NetTopNav(current = "My List", onNav = onNav)
-        
+    Column(Modifier.fillMaxSize().padding(top = 80.dp)) {
         Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
             Text("My Watchlist", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
             
@@ -725,38 +722,44 @@ private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit, onNav: (
 
 // ---------- Provider Dedicated Catalog Screen ----------
 @Composable
-private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 24.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 20.dp)) {
-            var focused by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier
-                    .scale(if (focused) 1.1f else 1f)
-                    .onFocusChanged { focused = it.isFocused }
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(NetDarkGray)
-                    .border(2.dp, if (focused) NetWhite else Color.Transparent, RoundedCornerShape(6.dp))
-                    .clickable(onClick = onBack)
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text("← Back", color = NetWhite, fontWeight = FontWeight.Bold)
+private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit, currentNav: String, onNav: (String) -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 24.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 20.dp)) {
+                var focused by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .scale(if (focused) 1.1f else 1f)
+                        .onFocusChanged { focused = it.isFocused }
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(NetDarkGray)
+                        .border(2.dp, if (focused) NetWhite else Color.Transparent, RoundedCornerShape(6.dp))
+                        .clickable(onClick = onBack)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Text("← Back", color = NetWhite, fontWeight = FontWeight.Bold)
+                }
+                Text("$providerName $kind", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             }
-            Text("$providerName $kind", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+
+            if (catalog.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No items found in this category.", color = NetMuted, fontSize = 16.sp)
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(150.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(catalog, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
+                }
+            }
         }
 
-        if (catalog.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No items found in this category.", color = NetMuted, fontSize = 16.sp)
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(150.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(catalog, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
-            }
+        Box(Modifier.align(Alignment.TopCenter)) {
+            NetTopNav(current = currentNav, onNav = onNav)
         }
     }
 }
@@ -765,7 +768,7 @@ private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: L
 private fun SearchScreen(
     query: String, onQuery: (String) -> Unit, results: List<Film>, searching: Boolean, onFilm: (Film) -> Unit
 ) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 16.dp)) {
+    Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 16.dp)) {
         OutlinedTextField(
             value = query, onValueChange = onQuery, singleLine = true,
             label = { Text("Search title, genre...") },
@@ -793,7 +796,7 @@ private fun SettingsScreen(
     torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: String,
     tmdbKey: String, onTmdb: (String) -> Unit, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("App Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text("TorBox API Key", color = NetMuted, fontSize = 13.sp)
         OutlinedTextField(

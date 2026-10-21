@@ -1,9 +1,11 @@
 package com.example.cinestreamtv
 
+import android.app.Activity
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.ViewGroup
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -281,6 +283,7 @@ fun NetCleanApp() {
     var torboxKey by remember { mutableStateOf(prefs.getString("torbox_token", "") ?: "") }
     var tmdbKey by remember { mutableStateOf(prefs.getString("tmdb_key", "") ?: "") }
     var screen by remember { mutableStateOf("Home") }
+    var lastBackPressTime by remember { mutableStateOf(0L) }
     var detail by remember { mutableStateOf<Film?>(null) }
     var play by remember { mutableStateOf<PlayReq?>(null) }
     var catalog by remember { mutableStateOf(demoFilms) }
@@ -354,8 +357,26 @@ fun NetCleanApp() {
         searching = false
     }
 
-    BackHandler(enabled = play != null || detail != null) {
-        if (play != null) play = null else detail = null
+    // Back button behaviour for Android TV and mobile:
+    // 1. Close the player, if it is open.
+    // 2. Close the details page, if it is open.
+    // 3. From any other section, return to Home (the top bubble navigation remains visible).
+    // 4. On Home, press Back twice within 2 seconds to exit.
+    BackHandler(enabled = true) {
+        when {
+            play != null -> play = null
+            detail != null -> detail = null
+            screen != "Home" -> screen = "Home"
+            else -> {
+                val now = System.currentTimeMillis()
+                if (now - lastBackPressTime < 2000L) {
+                    (context as? Activity)?.finish()
+                } else {
+                    lastBackPressTime = now
+                    Toast.makeText(context, "Press Back again to exit", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     MaterialTheme(

@@ -71,7 +71,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 // ---------- App Meta ----------
-private const val APP_VERSION = "1.5.0"
+private const val APP_VERSION = "1.5.2"
 
 // ---------- Theme Colors ----------
 private val NetBlack = Color(0xFF0B0B0B)
@@ -130,7 +130,6 @@ val start: Long
 
 data class Provider(val label: String, val tmdbId: Int)
 
-/** all = flat pool for search/hero. rows = ordered shelves. ranked = labels rendered as a Top 10. */
 data class Catalog(
 val all: List<Film>,
 val rows: List<Pair<String, List<Film>>>,
@@ -141,20 +140,38 @@ private val Resume.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId
 private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
 
 private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
+private fun wide(path: String) = "https://image.tmdb.org/t/p/w1280$path"
 
 private val demoFilms = listOf(
-Film("d1", 101, "Ted Lasso", "2023", "Series", poster("/5fhZdwP1DVJ0FyVH6vrFdHwpXIn.jpg"), "https://image.tmdb.org/t/p/w1280/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
+Film("d1", 101, "Ted Lasso", "2023", "Series", poster("/5fhZdwP1DVJ0FyVH6vrFdHwpXIn.jpg"), wide("/56v2KjBlU4XaOv9rVYEQypROD7P.jpg"),
 "An American football coach is hired to manage a British soccer team.", "8.6", "Apple TV+"),
-Film("d2", 102, "Succession", "2023", "Series", poster("/7HW47XbkNQ5fiwQFYGWdw9gs144.jpg"), "https://image.tmdb.org/t/p/w1280/4HodYYKEIsGOdhrGi2Ud6XGjBn1.jpg",
-"The Roy family is known for controlling the biggest media and entertainment company.", "8.8", "MAX"),
-Film("d3", 103, "The Mandalorian", "2023", "Series", poster("/eU1i6eHXlzMOlEq0ku1Rzq7Y4wA.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
+Film("d2", 102, "Succession", "2023", "Series", poster("/7HW47XbkNQ5fiwQFYGWdw9gs144.jpg"), wide("/4HodYYKEIsGOdhrGi2Ud6XGjBn1.jpg"),
+"The Roy family controls the biggest media and entertainment company in the world.", "8.8", "MAX"),
+Film("d3", 103, "The Mandalorian", "2023", "Series", poster("/eU1i6eHXlzMOlEq0ku1Rzq7Y4wA.jpg"), wide("/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg"),
 "The travels of a lone bounty hunter in the outer reaches of the galaxy.", "8.7", "Disney+"),
-Film("d4", 104, "Stranger Things", "2022", "Series", poster("/49WJfeN0moxb9ANekyaGEA1XFR6.jpg"), "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
-"When a young boy vanishes, a small town uncovers a mystery involving secret experiments.", "8.7", "Netflix")
+Film("d4", 104, "Stranger Things", "2022", "Series", poster("/49WJfeN0moxb9ANekyaGEA1XFR6.jpg"), wide("/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg"),
+"When a young boy vanishes, a small town uncovers a mystery involving secret experiments.", "8.7", "Netflix"),
+Film("d5", 105, "Breaking Bad", "2013", "Series", poster("/ggFHVNu6YYI5L9pCfOacjizRGt.jpg"), wide("/9faGSFi5jam6pDWGNd0p8JcJgXQ.jpg"),
+"A chemistry teacher diagnosed with cancer turns to making methamphetamine.", "9.3", "Netflix"),
+Film("d6", 106, "Game of Thrones", "2019", "Series", poster("/1XS1oqL89opfnbLl8WnZY1O1uJx.jpg"), wide("/2OMB0ynKlyIenMJWI2Dy9IWT4c.jpg"),
+"Noble families wage war for control of the Iron Throne of Westeros.", "8.4", "MAX"),
+Film("d7", 107, "The Last of Us", "2023", "Series", poster("/uKvVjHNqB5VmOrdxqAt2F7J78ED.jpg"), wide("/uDgy6hyPd82kOHh6I95FLtLnj6p.jpg"),
+"A hardened survivor escorts a teenage girl across a post-apocalyptic America.", "8.7", "MAX"),
+Film("d8", 108, "Wednesday", "2022", "Series", poster("/9PFonBhy4cQy7Jz20NpMygczOkv.jpg"), wide("/iHSwvRVsRyxpX7FE7GbviaDvgGZ.jpg"),
+"Wednesday Addams navigates her years at Nevermore Academy.", "8.1", "Netflix"),
+Film("d9", 109, "Oppenheimer", "2023", "Movie", poster("/8Gxv8gSFCU0XGDykEGv7zR1n2ua.jpg"), wide("/fm6KqXpk3M2HVveHwCrBSSBaO0V.jpg"),
+"The story of the physicist who led the race to build the atomic bomb.", "8.1", "Prime Video"),
+Film("d10", 110, "Dune", "2021", "Movie", poster("/d5NXSklXo0qyIYkgV94XAgMIckC.jpg"), wide("/jYEW5xZkZk2WTrdbMGAPFuBqbDc.jpg"),
+"A noble family becomes embroiled in a war for a desert planet's spice trade.", "7.8", "MAX"),
+Film("d11", 111, "Interstellar", "2014", "Movie", poster("/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg"), wide("/xJHokMbljvjADYdit5fK5VQsXEG.jpg"),
+"Explorers travel through a wormhole in search of a new home for humanity.", "8.4", "Prime Video"),
+Film("d12", 112, "Parasite", "2019", "Movie", poster("/7IiTTgloJzvGI1TAYymCfbfl3vT.jpg"), wide("/TU9NIjwzjoKPwQHoHshkFcQUCG.jpg"),
+"A poor family schemes to become employed by a wealthy household.", "8.5", "Prime Video")
 )
 
 // ---------- Helpers ----------
 private fun JSONObject.str(k: String): String = if (isNull(k)) "" else optString(k, "")
+
 private fun norm(s: String) = s.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
 
 private val EP = Regex("(?i)s(\\d{1,2})[ ._-]?e(\\d{1,3})|(?<![0-9])(\\d{1,2})x(\\d{1,3})")
@@ -176,6 +193,21 @@ return if (gb >= 1) "${Math.round(gb * 10) / 10.0} GB" else "${b / 1048576} MB"
 }
 
 private fun epTag(season: Int, number: Int) = "S%02dE%02d".format(season, number)
+
+private fun buildFallbackRows(all: List<Film>): List<Pair<String, List<Film>>> {
+if (all.isEmpty()) return emptyList()
+val out = ArrayList<Pair<String, List<Film>>>()
+out.add("Trending Now" to all.take(30))
+val movies = all.filter { it.kind == "Movie" }
+val series = all.filter { it.kind == "Series" }
+if (series.isNotEmpty()) out.add("TV Shows" to series)
+if (movies.isNotEmpty()) out.add("Movies" to movies)
+for (p in listOf("Netflix", "Prime Video", "Disney+", "Apple TV+", "MAX")) {
+val list = all.filter { it.provider == p }
+if (list.isNotEmpty()) out.add(p to list)
+}
+return out
+}
 
 private fun loadResume(p: SharedPreferences): List<Resume> = try {
 val arr = JSONArray(p.getString("resume", "[]"))
@@ -290,7 +322,7 @@ name = name,
 year = date.take(4),
 kind = if (kind == "tv") "Series" else "Movie",
 poster = poster(p),
-backdrop = if (b.isEmpty()) "" else "https://image.tmdb.org/t/p/w1280$b",
+backdrop = if (b.isEmpty()) "" else wide(b),
 overview = o.str("overview"),
 rating = if (r > 0) (Math.round(r * 10) / 10.0).toString() else "",
 provider = label
@@ -302,6 +334,27 @@ val arr = JSONObject(body).optJSONArray("results") ?: return emptyList()
 return (0 until arr.length()).mapNotNull {
 try { toFilm(arr.getJSONObject(it), fallbackKind, label) } catch (_: Exception) { null }
 }
+}
+
+suspend fun loadQuick(key: String): Catalog = withContext(Dispatchers.IO) {
+val quick = listOf(
+Triple("Trending Now", "/trending/all/week", "movie"),
+Triple("New Releases", "/movie/now_playing", "movie"),
+Triple("Binge-Worthy TV", "/tv/popular", "tv")
+)
+val all = LinkedHashMap<String, Film>()
+val rows = ArrayList<Pair<String, List<Film>>>()
+for ((label, path, kind) in quick) {
+try {
+val list = parse(call(path, key), kind, "")
+if (list.isNotEmpty()) {
+rows.add(label to list)
+list.forEach { all.putIfAbsent(it.id, it) }
+}
+} catch (_: Exception) {}
+}
+if (all.isEmpty()) Catalog(demoFilms, buildFallbackRows(demoFilms))
+else Catalog(all.values.toList(), rows)
 }
 
 private fun discover(kind: String, query: String, page: Int) =
@@ -350,7 +403,6 @@ parse(call(path, key), kind, "").forEach { row.putIfAbsent(it.id, it) }
 return spec.label to row.values.toList()
 }
 
-/** Big parallel catalog: ~50 requests, ~1000+ unique titles. */
 suspend fun load(key: String): Catalog = withContext(Dispatchers.IO) {
 val specs = specs()
 val ranked = specs.take(1).map { it.label }.toSet()
@@ -362,8 +414,11 @@ specs.map { spec -> async { fetchRow(key, spec) } }.awaitAll()
 val all = LinkedHashMap<String, Film>()
 fetched.forEach { (_, list) -> list.forEach { all.putIfAbsent(it.id, it) } }
 
-if (all.isEmpty()) Catalog(demoFilms, emptyList())
-else Catalog(all.values.toList(), fetched, ranked)
+when {
+all.isEmpty() -> Catalog(demoFilms, buildFallbackRows(demoFilms))
+fetched.isEmpty() -> Catalog(all.values.toList(), buildFallbackRows(all.values.toList()))
+else -> Catalog(all.values.toList(), fetched, ranked)
+}
 }
 
 suspend fun search(key: String, q: String): List<Film> = withContext(Dispatchers.IO) {
@@ -372,7 +427,6 @@ parse(call("/search/multi?query=${URLEncoder.encode(q, "UTF-8")}&include_adult=f
 } catch (_: Exception) { emptyList() }
 }
 
-/** Season numbers for a show (0 = Specials). */
 suspend fun seasons(key: String, tmdbId: Int): List<Int> = withContext(Dispatchers.IO) {
 try {
 val arr = JSONObject(call("/tv/$tmdbId", key)).optJSONArray("seasons") ?: return@withContext emptyList()
@@ -405,7 +459,6 @@ runtime = e.optInt("runtime", 0)
 } catch (e: Exception) { emptyList() }
 }
 
-/** IMDb rating via TMDB external ids -> OMDb. */
 suspend fun imdb(tmdbKey: String, omdbKey: String, film: Film): String? = withContext(Dispatchers.IO) {
 try {
 val kind = if (film.kind == "Series") "tv" else "movie"
@@ -493,7 +546,7 @@ var screen by remember { mutableStateOf("Home") }
 var selectedProvider by remember { mutableStateOf<String?>(null) }
 var detail by remember { mutableStateOf<Film?>(null) }
 var play by remember { mutableStateOf<PlayReq?>(null) }
-var catalog by remember { mutableStateOf(Catalog(demoFilms, emptyList())) }
+var catalog by remember { mutableStateOf(Catalog(demoFilms, buildFallbackRows(demoFilms))) }
 var query by remember { mutableStateOf("") }
 var results by remember { mutableStateOf<List<Film>>(emptyList()) }
 var searching by remember { mutableStateOf(false) }
@@ -505,7 +558,8 @@ var matches by remember { mutableStateOf<List<TbFile>>(emptyList()) }
 var detailMsg by remember { mutableStateOf("") }
 var detailBusy by remember { mutableStateOf(false) }
 var homeLoading by remember { mutableStateOf(false) }
-var homeError by remember { mutableStateOf("") }
+var homeNote by remember { mutableStateOf("") }
+var catalogNonce by remember { mutableStateOf(0) }
 val resume = remember { mutableStateListOf<Resume>().also { it.addAll(loadResume(prefs)) } }
 val watchlist = remember { mutableStateListOf<Film>().also { it.addAll(loadWatchlist(prefs)) } }
 
@@ -538,7 +592,6 @@ while (resume.size > 10) resume.removeAt(resume.size - 1)
 saveResume(prefs, resume)
 }
 
-/** Best TorBox file for an episode of a given show, if any. */
 fun fileForEpisode(show: Film, season: Int, number: Int): TbFile? {
 val n = norm(show.name)
 return library.firstOrNull { f ->
@@ -546,14 +599,22 @@ n.isNotEmpty() && norm(f.name).contains(n) && episodeOf(f.name) == (season to nu
 }
 }
 
-LaunchedEffect(tmdbKey) {
-if (tmdbKey.isBlank()) { catalog = Catalog(demoFilms, emptyList()); return@LaunchedEffect }
-homeLoading = true; homeError = ""
-try {
-val c = Tmdb.load(tmdbKey)
-if (c.all.isNotEmpty()) catalog = c
-} catch (e: Exception) { homeError = "Couldn't load catalog." }
+LaunchedEffect(tmdbKey, catalogNonce) {
+if (tmdbKey.isBlank()) {
+catalog = Catalog(demoFilms, buildFallbackRows(demoFilms))
+homeNote = "Demo titles. Add a TMDB API key in Settings to unlock the full catalog."
+return@LaunchedEffect
+}
+homeLoading = true
+homeNote = ""
+catalog = Tmdb.loadQuick(tmdbKey)
 homeLoading = false
+try {
+val full = Tmdb.load(tmdbKey)
+if (full.all.size > catalog.all.size) catalog = full
+} catch (e: Exception) {
+homeNote = "Full catalog failed to load — showing a partial list. Tap Refresh in Settings."
+}
 }
 
 LaunchedEffect(query, tmdbKey) {
@@ -565,7 +626,6 @@ else Tmdb.search(tmdbKey, query.trim())
 searching = false
 }
 
-// Preload the TorBox library when a series is opened, so episode rows can show availability.
 LaunchedEffect(detail?.id) {
 val d = detail
 if (d != null && d.kind == "Series" && torboxKey.isNotBlank() && library.isEmpty()) {
@@ -654,7 +714,12 @@ onBack = { detail = null }
 )
 }
 
-else -> {
+// Nav sits in normal layout flow, so content below gets a bounded height
+// and every scroll container actually has something to scroll against.
+else -> Column(Modifier.fillMaxSize().background(NetBlack)) {
+NetTopNav(current = screen) { screen = it; selectedProvider = null }
+
+Box(Modifier.fillMaxWidth().weight(1f)) {
 if (prov != null) {
 val kindFilter = if (screen == "Shows") "Series" else "Movie"
 val row = catalog.rows.firstOrNull { it.first == prov }?.second
@@ -668,7 +733,7 @@ onFilm = { open(it) }, onBack = { selectedProvider = null }
 when (screen) {
 "Home" -> HomeScreen(
 catalog = catalog, resume = resume,
-loading = homeLoading, error = homeError,
+loading = homeLoading, note = homeNote,
 onFilm = { open(it) },
 onResume = { r -> play = PlayReq(r.filmId, r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) }
 )
@@ -689,18 +754,11 @@ torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putStrin
 onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } }, tbStatus = tbStatus,
 tmdbKey = tmdbKey, onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
 omdbKey = omdbKey, onOmdb = { omdbKey = it.trim(); prefs.edit().putString("omdb_key", it.trim()).apply() },
-link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
+link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) },
+onRefresh = { catalogNonce++ }
 )
 }
 }
-
-Box(
-Modifier.align(Alignment.TopCenter).fillMaxWidth().height(110.dp)
-.background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)))
-)
-
-Box(Modifier.align(Alignment.TopCenter)) {
-NetTopNav(current = screen) { screen = it; selectedProvider = null }
 }
 }
 }
@@ -712,13 +770,13 @@ NetTopNav(current = screen) { screen = it; selectedProvider = null }
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
 Box(
-Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp),
+Modifier.fillMaxWidth().background(NetBlack).padding(vertical = 10.dp),
 contentAlignment = Alignment.Center
 ) {
 Row(
 modifier = Modifier
 .clip(RoundedCornerShape(50.dp))
-.background(Color(0xE61A1A1A))
+.background(Color(0xFF1A1A1A))
 .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(50.dp))
 .padding(horizontal = 6.dp, vertical = 6.dp),
 verticalAlignment = Alignment.CenterVertically,
@@ -882,7 +940,7 @@ private fun HeroContent(film: Film, onOpen: () -> Unit, modifier: Modifier = Mod
 val requester = remember { FocusRequester() }
 
 Column(
-modifier.padding(start = 32.dp, bottom = 34.dp).widthIn(max = 660.dp),
+modifier.padding(start = 32.dp, bottom = 30.dp).widthIn(max = 660.dp),
 verticalArrangement = Arrangement.spacedBy(12.dp)
 ) {
 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -892,8 +950,8 @@ Text(film.provider, color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.
 }
 }
 Text(
-film.name, color = NetWhite, fontSize = 46.sp, fontWeight = FontWeight.Black,
-maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 50.sp
+film.name, color = NetWhite, fontSize = 42.sp, fontWeight = FontWeight.Black,
+maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 46.sp
 )
 Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
 Text(film.year, color = NetMuted, fontSize = 13.sp)
@@ -925,12 +983,17 @@ private fun HomeScreen(
 catalog: Catalog,
 resume: List<Resume>,
 loading: Boolean,
-error: String,
+note: String,
 onFilm: (Film) -> Unit,
 onResume: (Resume) -> Unit
 ) {
 val hero = catalog.all.firstOrNull() ?: demoFilms.first()
-val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.74f).dp
+
+val rows = remember(catalog) {
+catalog.rows.ifEmpty { buildFallbackRows(catalog.all) }
+}
+
+val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.58f).dp
 val heroPx = with(LocalDensity.current) { heroHeight.toPx() }
 val listState = rememberLazyListState()
 
@@ -954,7 +1017,7 @@ alpha = (1f - scrolled / (heroPx * 0.75f)).coerceIn(0f, 1f)
 if (hero.backdrop.isNotEmpty()) {
 AsyncImage(model = hero.backdrop, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
 }
-Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.55f), Color.Transparent, NetBlack), startY = 0f, endY = heroPx)))
+Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent, NetBlack), startY = 0f, endY = heroPx)))
 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 800f)))
 }
 
@@ -962,6 +1025,25 @@ LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
 item(key = "hero") {
 Box(Modifier.fillMaxWidth().height(heroHeight)) {
 HeroContent(hero, onOpen = { onFilm(hero) }, modifier = Modifier.align(Alignment.BottomStart))
+}
+}
+
+if (note.isNotEmpty()) {
+item(key = "note") {
+Text(note, color = NetGold, fontSize = 13.sp, modifier = Modifier.padding(start = 32.dp, top = 6.dp))
+}
+}
+
+if (loading) {
+item(key = "loading") {
+Row(
+Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 12.dp),
+verticalAlignment = Alignment.CenterVertically,
+horizontalArrangement = Arrangement.spacedBy(12.dp)
+) {
+CircularProgressIndicator(color = NetRed, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+Text("Building your library...", color = NetMuted, fontSize = 13.sp)
+}
 }
 }
 
@@ -979,25 +1061,7 @@ items(resume, key = { it.key }) { r -> ResumeCard(r) { onResume(r) } }
 }
 }
 
-if (error.isNotEmpty()) {
-item(key = "err") {
-Text(error, color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 32.dp, top = 8.dp))
-}
-}
-if (loading) {
-item(key = "loading") {
-Row(
-Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 12.dp),
-verticalAlignment = Alignment.CenterVertically,
-horizontalArrangement = Arrangement.spacedBy(12.dp)
-) {
-CircularProgressIndicator(color = NetRed, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-Text("Building your library...", color = NetMuted, fontSize = 13.sp)
-}
-}
-}
-
-catalog.rows.forEach { (label, list) ->
+rows.forEach { (label, list) ->
 if (list.isEmpty()) return@forEach
 item(key = "row_$label") {
 Column(Modifier.fillMaxWidth().padding(vertical = 14.dp)) {
@@ -1036,7 +1100,7 @@ private val providerColors = mapOf(
 
 @Composable
 private fun ProviderHubScreen(title: String, available: List<String>, onSelect: (String) -> Unit) {
-Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 24.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 12.dp, bottom = 24.dp)) {
 Text(title, color = NetWhite, fontSize = 30.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 22.dp))
 
 LazyVerticalGrid(
@@ -1074,7 +1138,7 @@ Text("Browse collection", color = NetMuted, fontSize = 13.sp, letterSpacing = 0.
 // ---------- My List ----------
 @Composable
 private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit) {
-Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 24.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 12.dp, bottom = 24.dp)) {
 Text("My List", color = NetWhite, fontSize = 30.sp, fontWeight = FontWeight.Black, modifier = Modifier.padding(bottom = 22.dp))
 
 if (watchlist.isEmpty()) {
@@ -1097,7 +1161,7 @@ items(watchlist, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
 // ---------- Provider Catalog ----------
 @Composable
 private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit) {
-Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 24.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 12.dp, bottom = 24.dp)) {
 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 22.dp)) {
 var focused by remember { mutableStateOf(false) }
 Box(
@@ -1137,7 +1201,7 @@ items(catalog, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
 private fun SearchScreen(
 query: String, onQuery: (String) -> Unit, results: List<Film>, searching: Boolean, onFilm: (Film) -> Unit
 ) {
-Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 16.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 12.dp, bottom = 16.dp)) {
 OutlinedTextField(
 value = query, onValueChange = onQuery, singleLine = true,
 label = { Text("Search the whole catalog...") },
@@ -1174,7 +1238,8 @@ private fun SettingsScreen(
 torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: String,
 tmdbKey: String, onTmdb: (String) -> Unit,
 omdbKey: String, onOmdb: (String) -> Unit,
-link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
+link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit,
+onRefresh: () -> Unit
 ) {
 val field = OutlinedTextFieldDefaults.colors(
 focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray,
@@ -1184,7 +1249,7 @@ focusedTextColor = NetWhite, unfocusedTextColor = NetWhite
 
 Column(
 Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-.padding(start = 32.dp, end = 32.dp, top = 96.dp, bottom = 16.dp),
+.padding(start = 32.dp, end = 32.dp, top = 12.dp, bottom = 16.dp),
 verticalArrangement = Arrangement.spacedBy(12.dp)
 ) {
 Text("Settings", color = NetWhite, fontSize = 30.sp, fontWeight = FontWeight.Black)
@@ -1196,6 +1261,7 @@ if (tbStatus.isNotEmpty()) Text(tbStatus, color = NetWhite, fontSize = 14.sp)
 
 Text("TMDB API Key (catalog)", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
 OutlinedTextField(value = tmdbKey, onValueChange = onTmdb, singleLine = true, shape = RoundedCornerShape(8.dp), colors = field, modifier = Modifier.fillMaxWidth())
+NetCard(onClick = onRefresh) { Text("Refresh Catalog", color = NetWhite, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
 
 Text("OMDb API Key (IMDb ratings — optional)", color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
 OutlinedTextField(value = omdbKey, onValueChange = onOmdb, singleLine = true, shape = RoundedCornerShape(8.dp), colors = field, modifier = Modifier.fillMaxWidth())
@@ -1218,12 +1284,7 @@ Spacer(Modifier.height(20.dp))
 
 // ---------- Episode Browser ----------
 @Composable
-private fun EpisodeRow(
-ep: Episode,
-available: Boolean,
-progress: Float?,
-onClick: () -> Unit
-) {
+private fun EpisodeRow(ep: Episode, available: Boolean, progress: Float?, onClick: () -> Unit) {
 var focused by remember { mutableStateOf(false) }
 val scale by animateFloatAsState(if (focused) 1.02f else 1f, label = "epScale")
 
@@ -1509,7 +1570,6 @@ Text("Matching in your TorBox library...", color = NetMuted, fontSize = 14.sp)
 
 if (msg.isNotEmpty()) Text(msg, color = NetGold, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
 
-// ---- Episode browser (series only), sits under the buttons ----
 if (film.kind == "Series") {
 EpisodeBrowser(
 film = film,

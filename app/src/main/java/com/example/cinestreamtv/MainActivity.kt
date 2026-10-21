@@ -10,6 +10,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -422,7 +423,6 @@ fun NetCleanApp() {
                         )
                     }
 
-                    // Persistent floating top navigation bar across all screens
                     if (screen != "Home") {
                         Box(Modifier.align(Alignment.TopCenter)) {
                             NetTopNav(current = screen, onNav = { screen = it; selectedProvider = null })
@@ -474,6 +474,7 @@ private fun CapsuleNavItem(label: String, isSelected: Boolean, onClick: () -> Un
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(50.dp))
             .background(if (active) NetWhite else Color.Transparent)
+            .focusable()
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
@@ -501,6 +502,7 @@ private fun NetCard(
             .clip(RoundedCornerShape(6.dp))
             .background(NetDarkGray)
             .then(if (focused) Modifier.border(3.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
+            .focusable()
             .clickable(onClick = onClick)
     ) {
         content(this, focused)
@@ -549,7 +551,6 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     }
 }
 
-// ---------- Full Edge-to-Edge Hero Banner with Floating Navigation ----------
 @Composable
 private fun HeroBanner(film: Film, currentNav: String, onNav: (String) -> Unit, onOpen: () -> Unit) {
     Box(
@@ -681,6 +682,7 @@ private fun ProviderHubScreen(title: String, kind: String, onSelect: (String) ->
                             .clip(RoundedCornerShape(12.dp))
                             .background(prov.third)
                             .border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(12.dp))
+                            .focusable()
                             .clickable { onSelect(prov.first) },
                         contentAlignment = Alignment.Center
                     ) {
@@ -734,6 +736,7 @@ private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: L
                         .clip(RoundedCornerShape(6.dp))
                         .background(NetDarkGray)
                         .border(2.dp, if (focused) NetWhite else Color.Transparent, RoundedCornerShape(6.dp))
+                        .focusable()
                         .clickable(onClick = onBack)
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
@@ -887,6 +890,7 @@ private fun DetailsScreen(
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (playFocused) NetWhite else Color(0xFFE5E5E5))
                     .border(if (playFocused) 2.5.dp else 0.dp, NetWhite, RoundedCornerShape(6.dp))
+                    .focusable()
                     .clickable { if (!busy) onPlay(resumePos) },
                 contentAlignment = Alignment.CenterStart
             ) {
@@ -921,6 +925,7 @@ private fun DetailsScreen(
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (listFocused) Color(0xFF444444) else Color(0xFF2B2B2B))
                     .border(if (listFocused) 2.dp else 1.dp, if (listFocused) NetWhite else Color(0x55FFFFFF), RoundedCornerShape(6.dp))
+                    .focusable()
                     .clickable(onClick = onToggleWatchlist),
                 contentAlignment = Alignment.Center
             ) {

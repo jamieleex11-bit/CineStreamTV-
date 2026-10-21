@@ -53,13 +53,15 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// ---------- Modern Netflix TV Color Palette ----------
+// ---------- Netflix UI Theme Colors ----------
 private val NetBlack = Color(0xFF141414)
-private val NetSurface = Color(0xFF1B1B1B)
-private val NetFocus = Color(0xFF2B2B2B)
+private val NetDark = Color(0xFF0B0B0B)
+private val NetSurface = Color(0xFF1F1F1F)
+private val NetFocus = Color(0xFF333333)
 private val NetRed = Color(0xFFE50914)
 private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF8C8C8C)
+private val NetGreen = Color(0xFF46D369) // Match percentage green
 
 // ---------- Data Models ----------
 data class Film(
@@ -102,19 +104,19 @@ private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileI
 private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
 
 private val demoFilms = listOf(
-    Film("d1", "Stranger Things", "2022", "Series", poster("/49WJfeN0moxb9IPfGn8AIqMGskD.jpg"), "https://image.tmdb.org/t/p/w1280/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
-        "When a young boy vanishes, a small town uncovers a mystery involving secret experiments and terrifying supernatural forces.", "8.6"),
-    Film("d2", "Bridgerton", "2020", "Series", poster("/luoKpgVwi1E5nQsi7W0UuKHu2Rq.jpg"), "https://image.tmdb.org/t/p/w1280/kXJQv9GBnYJ0AvkWMe5JGPUlOW5.jpg",
-        "The eight close-knit siblings of the Bridgerton family look for love and happiness in London high society.", "8.1"),
-    Film("d3", "Interstellar", "2014", "Movie", poster("/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg"), "https://image.tmdb.org/t/p/w1280/rAiYTfKGqDCRIIqo664sY9XZIvQ.jpg",
-        "A team travels beyond this galaxy to discover whether mankind has a future among the stars.", "8.6"),
-    Film("d4", "Dune: Part Two", "2024", "Movie", poster("/1pdfLvkbY9ohJlCjQH2CZjjYVvJ.jpg"), "https://image.tmdb.org/t/p/w1280/xOMo8BRK7PfcJv9JCnx7s5hj0PX.jpg",
-        "Paul Atreides unites with Chani and the Fremen while seeking revenge.", "8.3")
+    Film("d1", "Money Heist", "2020", "Series", poster("/reEMJA1uzscCbkpeRJeTT2bjqUp.jpg"), "https://image.tmdb.org/t/p/w1280/gYZAHan5CHPFXORBF8xMjUv8UKJ.jpg",
+        "The Professor's plan begins to unravel and the crew must fend off enemies from both inside and outside the Bank of Spain.", "8.3"),
+    Film("d2", "Narcos", "2018", "Series", poster("/rktDFPbfHfUbArZ6OOOKsXcv0Bm.jpg"), "https://image.tmdb.org/t/p/w1280/z0j8cIb3mr9XUo9YdF1jRjW5r8.jpg",
+        "A chronicled look at the criminal exploits of Colombian drug lord Pablo Escobar.", "8.7"),
+    Film("d3", "The Irishman", "2019", "Movie", poster("/mbm8k3GFhXS0ROd9AD1gqYbIFbM.jpg"), "https://image.tmdb.org/t/p/w1280/vhdV2Z7XwYnHCqgsVInxovprXW.jpg",
+        "An old man recalls his time painting houses for his mob family.", "7.8"),
+    Film("d4", "Ozark", "2020", "Series", poster("/m7ahvcoHmUNRB8KTYx9X0x6PqXq.jpg"), "https://image.tmdb.org/t/p/w1280/q7iWw9g3w8e1Y0o4P1S1Q2V6R1y.jpg",
+        "A financial advisor drags his family from Chicago to the Missouri Ozarks.", "8.2")
 )
 
 private val demoRows: List<Pair<String, List<Film>>> = listOf(
-    "Trending Now" to demoFilms,
-    "Continue Watching & Favorites" to demoFilms.reversed()
+    "Popular on Netflix" to demoFilms,
+    "Trending Now" to demoFilms.reversed()
 )
 
 // ---------- Helpers ----------
@@ -214,7 +216,7 @@ private object Tb {
                 }
             }
             Pair("", out)
-        } catch (e: Exception) { Pair("TorBox connection error.", emptyList()) }
+        } catch (e: Exception) { Pair("TorBox error.", emptyList()) }
     }
 
     suspend fun link(key: String, torrentId: Int, fileId: Int): String? = withContext(Dispatchers.IO) {
@@ -229,8 +231,8 @@ private object Tb {
         if (key.isBlank()) "Enter API Key" else {
             try {
                 val o = JSONObject(httpGet("$BASE/user/me", key))
-                if (o.optBoolean("success", false)) "Connected Successfully" else "Invalid API Key"
-            } catch (e: Exception) { "Connection Failed" }
+                if (o.optBoolean("success", false)) "Connected" else "Invalid Key"
+            } catch (e: Exception) { "Failed" }
         }
     }
 }
@@ -240,12 +242,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         window.statusBarColor = android.graphics.Color.rgb(20, 20, 20)
         window.navigationBarColor = android.graphics.Color.rgb(20, 20, 20)
-        setContent { NetStreamApp() }
+        setContent { NetSidebarApp() }
     }
 }
 
 @Composable
-fun NetStreamApp() {
+fun NetSidebarApp() {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("netstream", Context.MODE_PRIVATE) }
     val scope = rememberCoroutineScope()
@@ -271,11 +273,11 @@ fun NetStreamApp() {
     val resume = remember { mutableStateListOf<Resume>().also { it.addAll(loadResume(prefs)) } }
 
     suspend fun loadLibrary() {
-        if (torboxKey.isBlank()) { libStatus = "Add TorBox API Key in Settings."; return }
+        if (torboxKey.isBlank()) { libStatus = "Add TorBox API Key."; return }
         libLoading = true
         val res = Tb.library(torboxKey)
         library = res.second
-        libStatus = res.first.ifEmpty { if (res.second.isEmpty()) "No files found in TorBox." else "" }
+        libStatus = res.first.ifEmpty { if (res.second.isEmpty()) "No TorBox files found." else "" }
         libLoading = false
     }
 
@@ -306,9 +308,9 @@ fun NetStreamApp() {
     LaunchedEffect(tmdbKey) {
         if (tmdbKey.isBlank()) { rows = demoRows; return@LaunchedEffect }
         val defs = listOf(
-            RowDef("Trending Now", "/trending/all/week", ""),
-            RowDef("Popular Movies", "/movie/popular", "movie"),
-            RowDef("Popular TV Shows", "/tv/popular", "tv")
+            RowDef("Popular on Netflix", "/trending/all/week", ""),
+            RowDef("Blockbuster Movies", "/movie/popular", "movie"),
+            RowDef("Bingeworthy Series", "/tv/popular", "tv")
         )
         val loaded = ArrayList<Pair<String, List<Film>>>()
         for (d in defs) {
@@ -324,7 +326,7 @@ fun NetStreamApp() {
         if (tmdbKey.isBlank()) {
             results = demoFilms.filter { it.name.contains(query, true) }
         } else {
-            delay(300)
+            delay(250)
             results = Tmdb.list("/search/multi?query=${URLEncoder.encode(query, "UTF-8")}&include_adult=false", tmdbKey, "")
         }
         searching = false
@@ -355,11 +357,11 @@ fun NetStreamApp() {
                             detailBusy = true; matches = emptyList(); detailMsg = ""
                             loadLibrary()
                             if (torboxKey.isBlank() || library.isEmpty()) {
-                                detailMsg = libStatus.ifEmpty { "No TorBox files available." }
+                                detailMsg = libStatus.ifEmpty { "No TorBox files found." }
                             } else {
                                 val n = norm(d.name)
                                 val m = library.filter { n.isNotEmpty() && norm(it.name).contains(n) }
-                                if (m.isEmpty()) detailMsg = "Not found in your TorBox files."
+                                if (m.isEmpty()) detailMsg = "Not found in TorBox."
                                 else if (m.size == 1) startTb(m[0], d.poster)
                                 else matches = m
                             }
@@ -370,30 +372,35 @@ fun NetStreamApp() {
                     onBack = { detail = null }
                 )
             } else {
-                Column(Modifier.fillMaxSize()) {
-                    TopNav(screen) { screen = it }
-                    when (screen) {
-                        "Home" -> HomeScreen(
-                            rows = rows, resume = resume, hasTmdb = tmdbKey.isNotBlank(),
-                            onFilm = { open(it) },
-                            onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) },
-                            onSettings = { screen = "Settings" }
-                        )
-                        "Search" -> SearchScreen(query, { query = it }, results, searching, tmdbKey.isNotBlank()) { open(it) }
-                        "Library" -> LibraryScreen(library, libStatus, libLoading,
-                            onRefresh = { scope.launch { loadLibrary() } },
-                            onPlay = { startTb(it, "") })
-                        "Settings" -> SettingsScreen(
-                            torboxKey = torboxKey,
-                            onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
-                            onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } },
-                            tbStatus = tbStatus,
-                            tmdbKey = tmdbKey,
-                            onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
-                            catalogStatus = catalogStatus,
-                            link = linkText, onLink = { linkText = it },
-                            onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
-                        )
+                Row(Modifier.fillMaxSize()) {
+                    // Left Side Navigation Rail (Like Netflix TV Reference)
+                    SideRail(current = screen, onNav = { screen = it })
+
+                    // Main Content Area
+                    Box(Modifier.weight(1f).fillMaxHeight()) {
+                        when (screen) {
+                            "Home" -> HomeScreen(
+                                rows = rows, resume = resume, hasTmdb = tmdbKey.isNotBlank(),
+                                onFilm = { open(it) },
+                                onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) },
+                                onSettings = { screen = "Settings" }
+                            )
+                            "Search" -> SearchScreen(query, { query = it }, results, searching, tmdbKey.isNotBlank()) { open(it) }
+                            "Library" -> LibraryScreen(library, libStatus, libLoading,
+                                onRefresh = { scope.launch { loadLibrary() } },
+                                onPlay = { startTb(it, "") })
+                            "Settings" -> SettingsScreen(
+                                torboxKey = torboxKey,
+                                onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
+                                onTest = { scope.launch { tbStatus = "Testing..."; tbStatus = Tb.test(torboxKey) } },
+                                tbStatus = tbStatus,
+                                tmdbKey = tmdbKey,
+                                onTmdb = { tmdbKey = it.trim(); prefs.edit().putString("tmdb_key", it.trim()).apply() },
+                                catalogStatus = catalogStatus,
+                                link = linkText, onLink = { linkText = it },
+                                onPlayLink = { if (linkText.startsWith("https://")) startUrl(linkText.trim()) }
+                            )
+                        }
                     }
                 }
             }
@@ -401,23 +408,62 @@ fun NetStreamApp() {
     }
 }
 
-// ---------- Modern Streamlined Components (Rounded & Smooth) ----------
+// ---------- UI Components matching Netflix Sidebar Reference ----------
 
 @Composable
-private fun ModernCard(
+private fun SideRail(current: String, onNav: (String) -> Unit) {
+    Column(
+        Modifier
+            .width(80.dp)
+            .fillMaxHeight()
+            .background(NetDark)
+            .padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(28.dp)
+    ) {
+        Text("N", color = NetRed, fontSize = 28.sp, fontWeight = FontWeight.Black)
+        Spacer(Modifier.height(10.dp))
+
+        val items = listOf(
+            Triple("Home", "🏠", "Home"),
+            Triple("Search", "🔍", "Search"),
+            Triple("Library", "📁", "Library"),
+            Triple("Settings", "⚙️", "Settings")
+        )
+
+        items.forEach { (tab, icon, label) ->
+            var focused by remember { mutableStateOf(false) }
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .scale(if (focused) 1.15f else 1f)
+                    .onFocusChanged { focused = it.isFocused }
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (current == tab) NetFocus else Color.Transparent)
+                    .then(if (focused) Modifier.border(2.dp, NetWhite, RoundedCornerShape(8.dp)) else Modifier)
+                    .clickable { onNav(tab) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(icon, fontSize = 20.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NetCard(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(10.dp), // Modern softer curved cards
     onClick: () -> Unit,
     content: @Composable BoxScope.(Boolean) -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier
-            .scale(if (focused) 1.06f else 1f)
+            .scale(if (focused) 1.08f else 1f)
             .onFocusChanged { focused = it.isFocused }
-            .clip(shape)
-            .background(if (focused) NetFocus else NetSurface)
-            .then(if (focused) Modifier.border(2.5.dp, NetWhite, shape) else Modifier)
+            .clip(RoundedCornerShape(6.dp))
+            .background(NetSurface)
+            .then(if (focused) Modifier.border(2.5.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
             .clickable(onClick = onClick)
     ) {
         content(this, focused)
@@ -431,9 +477,9 @@ private fun NetButton(label: String, primary: Boolean = false, onClick: () -> Un
         modifier = Modifier
             .scale(if (focused) 1.04f else 1f)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(8.dp))
-            .background(if (primary) NetWhite else Color(0x55808080))
-            .then(if (focused) Modifier.border(2.dp, NetWhite, RoundedCornerShape(8.dp)) else Modifier)
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (primary) NetWhite else Color(0x66808080))
+            .then(if (focused) Modifier.border(2.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -442,49 +488,21 @@ private fun NetButton(label: String, primary: Boolean = false, onClick: () -> Un
             color = if (primary) Color.Black else NetWhite,
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp)
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp)
         )
     }
 }
 
 @Composable
-private fun TopNav(current: String, onNav: (String) -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(28.dp)
-    ) {
-        Text("N", color = NetRed, fontSize = 30.sp, fontWeight = FontWeight.Black)
-        listOf("Home", "Search", "Library", "Settings").forEach { tab ->
-            var focused by remember { mutableStateOf(false) }
-            Box(
-                modifier = Modifier
-                    .onFocusChanged { focused = it.isFocused }
-                    .scale(if (focused) 1.05f else 1f)
-                    .clickable { onNav(tab) }
-                    .padding(vertical = 4.dp)
-            ) {
-                Text(
-                    tab,
-                    color = if (current == tab) NetWhite else NetMuted,
-                    fontSize = 15.sp,
-                    fontWeight = if (current == tab) FontWeight.Bold else FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun PosterCard(film: Film, onClick: () -> Unit) {
-    ModernCard(modifier = Modifier.width(135.dp).height(200.dp), onClick = onClick) {
+    NetCard(modifier = Modifier.width(140.dp).height(210.dp), onClick = onClick) {
         AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
 }
 
 @Composable
 private fun ContinueCard(r: Resume, onClick: () -> Unit) {
-    ModernCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
+    NetCard(modifier = Modifier.width(260.dp).height(145.dp), onClick = onClick) {
         if (r.image.isNotEmpty()) {
             AsyncImage(model = r.image, contentDescription = r.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
@@ -504,11 +522,11 @@ private fun ContinueCard(r: Resume, onClick: () -> Unit) {
 private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Text(
-            title, color = NetWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+            title, color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(start = 32.dp, bottom = 8.dp)
         )
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 48.dp),
+            contentPadding = PaddingValues(horizontal = 32.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             items(list) { f -> PosterCard(f) { onFilm(f) } }
@@ -518,23 +536,31 @@ private fun Shelf(title: String, list: List<Film>, onFilm: (Film) -> Unit) {
 
 @Composable
 private fun HeroBanner(film: Film, onOpen: () -> Unit) {
-    Box(Modifier.fillMaxWidth().height(350.dp)) {
+    Box(Modifier.fillMaxWidth().height(400.dp)) {
         if (film.backdrop.isNotEmpty()) {
             AsyncImage(model = film.backdrop, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 120f)))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 180f)))
         
         Column(
-            Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 32.dp).width(500.dp),
+            Modifier.align(Alignment.BottomStart).padding(start = 32.dp, bottom = 36.dp).width(520.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("N", color = NetRed, fontSize = 14.sp, fontWeight = FontWeight.Black)
                 Text("SERIES", color = NetWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
             }
-            Text(film.name, color = NetWhite, fontSize = 34.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(film.name, color = NetWhite, fontSize = 40.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("97% Match", color = NetGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(film.year, color = NetWhite, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Text("HD", color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.border(1.dp, NetWhite, RoundedCornerShape(2.dp)).padding(horizontal = 4.dp, vertical = 1.dp))
+            }
+            
             Text(film.overview, color = NetWhite, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, lineHeight = 18.sp)
-            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            
+            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 NetButton("▶ Play", primary = true) { onOpen() }
                 NetButton("ℹ More Info") { onOpen() }
             }
@@ -557,8 +583,8 @@ private fun HomeScreen(
         if (resume.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                    Text("Continue Watching", color = NetWhite, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, bottom = 8.dp))
-                    LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Continue Watching", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 32.dp, bottom = 8.dp))
+                    LazyRow(contentPadding = PaddingValues(horizontal = 32.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(resume) { r -> ContinueCard(r) { onResume(r) } }
                     }
                 }
@@ -573,17 +599,16 @@ private fun HomeScreen(
 private fun SearchScreen(
     query: String, onQuery: (String) -> Unit, results: List<Film>, searching: Boolean, hasTmdb: Boolean, onFilm: (Film) -> Unit
 ) {
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
         OutlinedTextField(
             value = query, onValueChange = onQuery, singleLine = true,
-            label = { Text("Search title...") },
-            shape = RoundedCornerShape(8.dp),
+            label = { Text("Search title, genre...") },
+            shape = RoundedCornerShape(6.dp),
             colors = OutlinedTextFieldDefaults.colors(focusedTextColor = NetWhite, unfocusedTextColor = NetWhite, focusedBorderColor = NetWhite),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 8.dp)
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         )
         LazyVerticalGrid(
-            columns = GridCells.Adaptive(135.dp),
-            contentPadding = PaddingValues(horizontal = 48.dp, vertical = 12.dp),
+            columns = GridCells.Adaptive(140.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize()
@@ -595,7 +620,7 @@ private fun SearchScreen(
 
 @Composable
 private fun LibraryScreen(files: List<TbFile>, status: String, loading: Boolean, onRefresh: () -> Unit, onPlay: (TbFile) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp)) {
+    Column(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("TorBox Cloud Library", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
             NetButton("Refresh") { onRefresh() }
@@ -604,7 +629,7 @@ private fun LibraryScreen(files: List<TbFile>, status: String, loading: Boolean,
         if (status.isNotEmpty()) Text(status, color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(vertical = 8.dp))
         LazyColumn(contentPadding = PaddingValues(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxSize()) {
             items(files) { f ->
-                ModernCard(modifier = Modifier.fillMaxWidth(), onClick = { onPlay(f) }) {
+                NetCard(modifier = Modifier.fillMaxWidth(), onClick = { onPlay(f) }) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(f.name, color = NetWhite, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
                         Text(fmtSize(f.size), color = NetMuted, fontSize = 13.sp)
@@ -620,18 +645,18 @@ private fun SettingsScreen(
     torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: String,
     tmdbKey: String, onTmdb: (String) -> Unit, catalogStatus: String, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         Text("TorBox API Key", color = NetMuted, fontSize = 14.sp)
-        OutlinedTextField(value = torboxKey, onValueChange = onTorbox, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = torboxKey, onValueChange = onTorbox, singleLine = true, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth())
         NetButton("Test TorBox Connection") { onTest() }
         if (tbStatus.isNotEmpty()) Text(tbStatus, color = NetWhite, fontSize = 14.sp)
         
         Text("TMDB API Key (For Catalogs & Posters)", color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
-        OutlinedTextField(value = tmdbKey, onValueChange = onTmdb, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = tmdbKey, onValueChange = onTmdb, singleLine = true, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth())
         
         Text("Direct Stream Link", color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 10.dp))
-        OutlinedTextField(value = link, onValueChange = onLink, singleLine = true, shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(value = link, onValueChange = onLink, singleLine = true, shape = RoundedCornerShape(6.dp), modifier = Modifier.fillMaxWidth())
         NetButton("Play Link") { onPlayLink() }
     }
 }
@@ -645,7 +670,7 @@ private fun DetailsScreen(film: Film, msg: String, matches: List<TbFile>, busy: 
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.9f), NetBlack.copy(alpha = 0.3f)))))
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 48.dp, vertical = 40.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(32.dp)) {
-                AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.width(180.dp).height(270.dp).clip(RoundedCornerShape(10.dp)), contentScale = ContentScale.Crop)
+                AsyncImage(model = film.poster, contentDescription = film.name, modifier = Modifier.width(180.dp).height(270.dp).clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(film.name, color = NetWhite, fontSize = 34.sp, fontWeight = FontWeight.Black)
                     Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 5, lineHeight = 22.sp)
@@ -657,7 +682,7 @@ private fun DetailsScreen(film: Film, msg: String, matches: List<TbFile>, busy: 
                     if (matches.isNotEmpty()) {
                         Text("Select File Variant:", color = NetWhite, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         matches.forEach { f ->
-                            ModernCard(modifier = Modifier.fillMaxWidth(), onClick = { onPick(f) }) {
+                            NetCard(modifier = Modifier.fillMaxWidth(), onClick = { onPick(f) }) {
                                 Text(f.name + " (" + fmtSize(f.size) + ")", color = NetWhite, fontSize = 14.sp, modifier = Modifier.padding(14.dp))
                             }
                         }
@@ -677,7 +702,7 @@ private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Lon
     LaunchedEffect(req) {
         if (url.isEmpty() && req.torrentId >= 0) {
             val link = Tb.link(torboxKey, req.torrentId, req.fileId)
-            if (link == null) error = "Failed to fetch stream link from TorBox." else url = link
+            if (link == null) error = "Failed to fetch stream link." else url = link
         }
     }
 

@@ -59,6 +59,7 @@ private val NetDarkGray = Color(0xFF1F1F1F)
 private val NetRed = Color(0xFFE50914)
 private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF8C8C8C)
+private val JamieGold = Color(0xFFFFD166)
 
 // ---------- Data Models ----------
 data class Film(
@@ -163,18 +164,21 @@ private object Tmdb {
 
     suspend fun catalog(key: String): List<Film> = withContext(Dispatchers.IO) {
         try {
-            val body = call("/trending/all/week", key)
-            val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
             val out = ArrayList<Film>()
             val providers = listOf("Netflix", " Apple TV+", "Disney+", "MAX", "Prime Video")
-            
-            for (i in 0 until arr.length()) {
+            // Load several pages of today's trending titles for a much larger catalog.
+            val seen = HashSet<String>()
+            for (page in 1..5) {
+              val body = call("/trending/all/day?page=$page", key)
+              val arr = JSONObject(body).optJSONArray("results") ?: continue
+              for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 val kind = o.str("media_type")
                 if (kind != "movie" && kind != "tv") continue
                 val p = o.str("poster_path")
                 if (p.isEmpty()) continue
                 val id = o.optInt("id")
+                if (!seen.add("$kind$id")) continue
                 val name = o.str("title").ifEmpty { o.str("name") }
                 val date = o.str("release_date").ifEmpty { o.str("first_air_date") }
                 val b = o.str("backdrop_path")
@@ -189,6 +193,7 @@ private object Tmdb {
                         assignedProvider
                     )
                 )
+              }
             }
             out
         } catch (e: Exception) { emptyList() }
@@ -300,6 +305,25 @@ fun NetCleanApp() {
     var detailMsg by remember { mutableStateOf("") }
     var detailBusy by remember { mutableStateOf(false) }
     val resume = remember { mutableStateListOf<Resume>().also { it.addAll(loadResume(prefs)) } }
+    val watchlist = remember { mutableStateListOf<Film>().also { list ->
+        try {
+            val saved = JSONArray(prefs.getString("watchlist", "[]"))
+            for (i in 0 until saved.length()) {
+                val o = saved.getJSONObject(i)
+                list.add(Film(o.optString("id"), o.optInt("tmdbId"), o.optString("name"), o.optString("year"), o.optString("kind"), o.optString("poster"), o.optString("backdrop"), o.optString("overview"), o.optString("rating"), o.optString("provider")))
+            }
+        } catch (_: Exception) { }
+    } }
+    fun saveWatchlist() {
+        val arr = JSONArray()
+        watchlist.forEach { f -> arr.put(JSONObject().put("id", f.id).put("tmdbId", f.tmdbId).put("name", f.name).put("year", f.year).put("kind", f.kind).put("poster", f.poster).put("backdrop", f.backdrop).put("overview", f.overview).put("rating", f.rating).put("provider", f.provider)) }
+        prefs.edit().putString("watchlist", arr.toString()).apply()
+    }
+    fun toggleWatchlist(f: Film) {
+        val index = watchlist.indexOfFirst { it.id == f.id }
+        if (index >= 0) watchlist.removeAt(index) else watchlist.add(0, f)
+        saveWatchlist()
+    }
 
     suspend fun loadLibrary(): List<TbFile> {
         if (torboxKey.isBlank()) {
@@ -395,6 +419,18 @@ fun NetCleanApp() {
                 val matchingResume = resume.firstOrNull { it.name.contains(d.name, true) }
                 DetailsScreen(
                     film = d, msg = detailMsg, matches = matches, busy = detailBusy,
+                    isInWatchlist = watchlist.any { it.id == d.id },
+                    onToggleWatchlist = { toggleWatchlist(d) },
+                    onEpisodes = {
+                        scope.launch {
+                            detailBusy = true; matches = emptyList(); detailMsg = "Looking for episodes in your TorBox library..."
+                            val loadedFiles = loadLibrary()
+                            val n = norm(d.name)
+                            matches = loadedFiles.filter { n.isNotEmpty() && norm(it.name).contains(n) }
+                            detailMsg = if (matches.isEmpty()) "No matching episodes found in your TorBox library." else "Choose an episode below."
+                            detailBusy = false
+                        }
+                    },
                     resumePos = matchingResume?.pos ?: 0L,
                     resumeDur = matchingResume?.dur ?: 0L,
                     onPlay = { posToStart ->
@@ -423,6 +459,7 @@ fun NetCleanApp() {
                         "Home" -> HomeScreen(catalog = catalog, resume = resume, onFilm = { open(it) }, onResume = { r -> play = PlayReq(r.name, r.image, r.url, r.torrentId, r.fileId, r.pos) })
                         "Shows" -> ProviderFilteredScreen(title = "TV Shows", catalog = catalog.filter { it.kind == "Series" }, onFilm = { open(it) })
                         "Movies" -> ProviderFilteredScreen(title = "Movies", catalog = catalog.filter { it.kind == "Movie" }, onFilm = { open(it) })
+                        "My List" -> ProviderFilteredScreen(title = "My Watchlist", catalog = watchlist.toList(), onFilm = { open(it) })
                         "Search" -> SearchScreen(query, { query = it }, results, searching) { open(it) }
                         "Settings" -> SettingsScreen(
                             torboxKey = torboxKey, onTorbox = { torboxKey = it.trim(); prefs.edit().putString("torbox_token", it.trim()).apply() },
@@ -466,6 +503,7 @@ private fun NetTopNav(current: String, onNav: (String) -> Unit) {
             CapsuleNavItem(label = "Home", isSelected = current == "Home") { onNav("Home") }
             CapsuleNavItem(label = "Shows", isSelected = current == "Shows") { onNav("Shows") }
             CapsuleNavItem(label = "Movies", isSelected = current == "Movies") { onNav("Movies") }
+            CapsuleNavItem(label = "My List", isSelected = current == "My List") { onNav("My List") }
             CapsuleNavItem(label = "Settings", isSelected = current == "Settings") { onNav("Settings") }
         }
     }
@@ -690,7 +728,7 @@ private fun HomeScreen(
             }
         }
 
-        item(key = "trending", contentType = "shelf") { Shelf("Trending Now", trending, onFilm, onHeroFocus) }
+        item(key = "trending", contentType = "trending") { TrendingTodayShelf(trending, onFilm, onHeroFocus) }
         item(key = "apple", contentType = "shelf") { Shelf(" Apple TV+ Originals", appleFilms, onFilm, onHeroFocus) }
         item(key = "disney", contentType = "shelf") { Shelf("Disney+ Collection", disneyFilms, onFilm, onHeroFocus) }
         item(key = "max", contentType = "shelf") { Shelf("MAX (HBO)", hboFilms, onFilm, onHeroFocus) }
@@ -782,6 +820,41 @@ private fun SettingsScreen(
             modifier = Modifier.fillMaxWidth()
         )
         NetCard(onClick = onPlayLink) { Text("Play Link", color = NetWhite, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) }
+        Spacer(Modifier.height(28.dp))
+        Text("Made by Jamie", color = JamieGold, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    }
+}
+
+@Composable
+private fun ActionPillButton(label: String, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        Modifier.width(320.dp).height(48.dp).scale(if (focused) 1.03f else 1f)
+            .onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (focused) NetWhite else Color(0xFF303030))
+            .border(1.dp, if (focused) NetWhite else Color(0xFF555555), RoundedCornerShape(6.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Text(label, color = if (focused) Color.Black else NetWhite, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 24.dp))
+    }
+}
+
+@Composable
+private fun TrendingTodayShelf(list: List<Film>, onFilm: (Film) -> Unit, onFocus: (Film) -> Unit) {
+    if (list.isEmpty()) return
+    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        Text("Top 10 Trending Today", color = NetWhite, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 48.dp, bottom = 10.dp))
+        LazyRow(contentPadding = PaddingValues(horizontal = 48.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(list.take(10), key = { "trending-${it.id}" }, contentType = { "trending-card" }) { film ->
+                val rank = list.indexOf(film) + 1
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy((-10).dp)) {
+                    Text(rank.toString(), color = Color(0xFF8A8A8A), fontSize = 84.sp, fontWeight = FontWeight.Black, modifier = Modifier.width(62.dp).align(Alignment.Bottom))
+                    PosterCard(film, onClick = { onFilm(film) }, onFocus = { onFocus(film) })
+                }
+            }
+        }
     }
 }
 
@@ -791,6 +864,9 @@ private fun DetailsScreen(
     msg: String,
     matches: List<TbFile>,
     busy: Boolean,
+    isInWatchlist: Boolean,
+    onToggleWatchlist: () -> Unit,
+    onEpisodes: () -> Unit,
     resumePos: Long,
     resumeDur: Long,
     onPlay: (Long) -> Unit,
@@ -867,6 +943,9 @@ private fun DetailsScreen(
                     )
                 }
             }
+
+            ActionPillButton(label = if (film.kind == "Series") "Episodes" else "Find in TorBox", onClick = onEpisodes)
+            ActionPillButton(label = if (isInWatchlist) "✓ Added to My List" else "+ Add to My List", onClick = onToggleWatchlist)
 
             if (msg.isNotEmpty()) {
                 Text(msg, color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))

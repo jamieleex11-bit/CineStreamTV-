@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -70,7 +71,7 @@ import java.net.URL
 import java.net.URLEncoder
 
 // ---------- App Meta ----------
-private const val APP_VERSION = "1.4.0"
+private const val APP_VERSION = "1.5.0"
 
 // ---------- Theme Colors ----------
 private val NetBlack = Color(0xFF0B0B0B)
@@ -92,6 +93,16 @@ val backdrop: String,
 val overview: String,
 val rating: String,
 val provider: String
+)
+
+data class Episode(
+val season: Int,
+val number: Int,
+val name: String,
+val overview: String,
+val still: String,
+val air: String,
+val runtime: Int
 )
 
 data class Resume(
@@ -119,7 +130,7 @@ val start: Long
 
 data class Provider(val label: String, val tmdbId: Int)
 
-/** all = flat pool for search/hero. rows = ordered shelves (label -> titles). ranked = first row is a Top 10. */
+/** all = flat pool for search/hero. rows = ordered shelves. ranked = labels rendered as a Top 10. */
 data class Catalog(
 val all: List<Film>,
 val rows: List<Pair<String, List<Film>>>,
@@ -163,6 +174,8 @@ private fun fmtSize(b: Long): String {
 val gb = b / 1073741824.0
 return if (gb >= 1) "${Math.round(gb * 10) / 10.0} GB" else "${b / 1048576} MB"
 }
+
+private fun epTag(season: Int, number: Int) = "S%02dE%02d".format(season, number)
 
 private fun loadResume(p: SharedPreferences): List<Resume> = try {
 val arr = JSONArray(p.getString("resume", "[]"))
@@ -359,16 +372,47 @@ parse(call("/search/multi?query=${URLEncoder.encode(q, "UTF-8")}&include_adult=f
 } catch (_: Exception) { emptyList() }
 }
 
-/** IMDb rating via TMDB external ids -> OMDb. Returns "rating" to "votes". */
-suspend fun imdb(tmdbKey: String, omdbKey: String, film: Film): Pair<String, String>? = withContext(Dispatchers.IO) {
+/** Season numbers for a show (0 = Specials). */
+suspend fun seasons(key: String, tmdbId: Int): List<Int> = withContext(Dispatchers.IO) {
+try {
+val arr = JSONObject(call("/tv/$tmdbId", key)).optJSONArray("seasons") ?: return@withContext emptyList()
+(0 until arr.length())
+.map { arr.getJSONObject(it).optInt("season_number", -1) }
+.filter { it >= 0 }
+.sortedWith(compareBy({ if (it == 0) 1 else 0 }, { it }))
+} catch (e: Exception) { emptyList() }
+}
+
+suspend fun season(key: String, tmdbId: Int, season: Int): List<Episode> = withContext(Dispatchers.IO) {
+try {
+val arr = JSONObject(call("/tv/$tmdbId/season/$season", key)).optJSONArray("episodes")
+?: return@withContext emptyList()
+(0 until arr.length()).mapNotNull { i ->
+val e = arr.getJSONObject(i)
+val num = e.optInt("episode_number", -1)
+if (num < 0) return@mapNotNull null
+val still = e.str("still_path")
+Episode(
+season = season,
+number = num,
+name = e.str("name"),
+overview = e.str("overview"),
+still = if (still.isEmpty()) "" else "https://image.tmdb.org/t/p/w300$still",
+air = e.str("air_date"),
+runtime = e.optInt("runtime", 0)
+)
+}
+} catch (e: Exception) { emptyList() }
+}
+
+/** IMDb rating via TMDB external ids -> OMDb. */
+suspend fun imdb(tmdbKey: String, omdbKey: String, film: Film): String? = withContext(Dispatchers.IO) {
 try {
 val kind = if (film.kind == "Series") "tv" else "movie"
 val imdbId = JSONObject(call("/$kind/${film.tmdbId}/external_ids", tmdbKey)).str("imdb_id")
 if (imdbId.isEmpty()) return@withContext null
-val o = JSONObject(httpGet("https://www.omdbapi.com/?i=$imdbId&apikey=$omdbKey"))
-val r = o.str("imdbRating")
-if (r.isEmpty() || r == "N/A") return@withContext null
-r to o.str("imdbVotes")
+val r = JSONObject(httpGet("https://www.omdbapi.com/?i=$imdbId&apikey=$omdbKey")).str("imdbRating")
+if (r.isEmpty() || r == "N/A") null else r
 } catch (e: Exception) { null }
 }
 }
@@ -494,6 +538,14 @@ while (resume.size > 10) resume.removeAt(resume.size - 1)
 saveResume(prefs, resume)
 }
 
+/** Best TorBox file for an episode of a given show, if any. */
+fun fileForEpisode(show: Film, season: Int, number: Int): TbFile? {
+val n = norm(show.name)
+return library.firstOrNull { f ->
+n.isNotEmpty() && norm(f.name).contains(n) && episodeOf(f.name) == (season to number)
+}
+}
+
 LaunchedEffect(tmdbKey) {
 if (tmdbKey.isBlank()) { catalog = Catalog(demoFilms, emptyList()); return@LaunchedEffect }
 homeLoading = true; homeError = ""
@@ -511,6 +563,14 @@ delay(250)
 results = if (tmdbKey.isBlank()) catalog.all.filter { it.name.contains(query, true) }
 else Tmdb.search(tmdbKey, query.trim())
 searching = false
+}
+
+// Preload the TorBox library when a series is opened, so episode rows can show availability.
+LaunchedEffect(detail?.id) {
+val d = detail
+if (d != null && d.kind == "Series" && torboxKey.isNotBlank() && library.isEmpty()) {
+loadLibrary()
+}
 }
 
 BackHandler(enabled = play != null || detail != null || selectedProvider != null) {
@@ -542,9 +602,36 @@ resumePos = matchingResume?.pos ?: 0L,
 resumeDur = matchingResume?.dur ?: 0L,
 isInWatchlist = isInWatchlist,
 tmdbKey = tmdbKey, omdbKey = omdbKey,
+libraryReady = library.isNotEmpty(),
+episodeFile = { s, n -> fileForEpisode(d, s, n) != null },
+episodeProgress = { s, n ->
+resume.firstOrNull { it.filmId == d.id && episodeOf(it.name) == (s to n) }
+?.takeIf { it.dur > 0 }
+?.let { (it.pos.toFloat() / it.dur.toFloat()).coerceIn(0f, 1f) }
+},
 onToggleWatchlist = {
 if (isInWatchlist) watchlist.removeAll { it.id == d.id } else watchlist.add(d)
 saveWatchlist(prefs, watchlist)
+},
+onEpisode = { season, number ->
+scope.launch {
+detailBusy = true; detailMsg = ""; matches = emptyList()
+loadLibrary()
+val hit = fileForEpisode(d, season, number)
+if (hit != null) {
+startTb(hit, d, 0L)
+} else {
+val n = norm(d.name)
+val all = library.filter { n.isNotEmpty() && norm(it.name).contains(n) }
+detailMsg = if (all.isEmpty())
+"${epTag(season, number)} isn't in your TorBox library."
+else {
+matches = all
+"${epTag(season, number)} not found — pick a file below."
+}
+}
+detailBusy = false
+}
 },
 onPlay = { posToStart ->
 scope.launch {
@@ -568,7 +655,6 @@ onBack = { detail = null }
 }
 
 else -> {
-// Content layer
 if (prov != null) {
 val kindFilter = if (screen == "Shows") "Series" else "Movie"
 val row = catalog.rows.firstOrNull { it.first == prov }?.second
@@ -608,13 +694,11 @@ link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsW
 }
 }
 
-// Top scrim so the floating nav is always readable
 Box(
 Modifier.align(Alignment.TopCenter).fillMaxWidth().height(110.dp)
 .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.85f), Color.Transparent)))
 )
 
-// Floating nav — overlay, never in the scroll, hero runs full-bleed behind it
 Box(Modifier.align(Alignment.TopCenter)) {
 NetTopNav(current = screen) { screen = it; selectedProvider = null }
 }
@@ -850,7 +934,6 @@ val heroHeight = (LocalConfiguration.current.screenHeightDp * 0.74f).dp
 val heroPx = with(LocalDensity.current) { heroHeight.toPx() }
 val listState = rememberLazyListState()
 
-// How far the hero has scrolled, clamped to its height.
 val scrolled by remember {
 derivedStateOf {
 if (listState.firstVisibleItemIndex > 0) heroPx
@@ -859,7 +942,6 @@ else listState.firstVisibleItemScrollOffset.toFloat().coerceAtMost(heroPx)
 }
 
 Box(Modifier.fillMaxSize().background(NetBlack)) {
-// PINNED hero backdrop — stays put while the content slides over it.
 Box(
 Modifier
 .fillMaxWidth()
@@ -876,7 +958,6 @@ Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.
 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.9f), Color.Transparent), endX = 800f)))
 }
 
-// Scrolling layer
 LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
 item(key = "hero") {
 Box(Modifier.fillMaxWidth().height(heroHeight)) {
@@ -1135,6 +1216,159 @@ Spacer(Modifier.height(20.dp))
 }
 }
 
+// ---------- Episode Browser ----------
+@Composable
+private fun EpisodeRow(
+ep: Episode,
+available: Boolean,
+progress: Float?,
+onClick: () -> Unit
+) {
+var focused by remember { mutableStateOf(false) }
+val scale by animateFloatAsState(if (focused) 1.02f else 1f, label = "epScale")
+
+Row(
+Modifier
+.fillMaxWidth()
+.scale(scale)
+.onFocusChanged { focused = it.isFocused }
+.clip(RoundedCornerShape(8.dp))
+.background(if (focused) Color(0xFF2A2A2A) else Color(0x12FFFFFF))
+.border(if (focused) 2.dp else 1.dp, if (focused) NetWhite else Color(0x1FFFFFFF), RoundedCornerShape(8.dp))
+.clickable(onClick = onClick)
+.padding(10.dp),
+verticalAlignment = Alignment.CenterVertically,
+horizontalArrangement = Arrangement.spacedBy(14.dp)
+) {
+Box(Modifier.width(150.dp).height(84.dp).clip(RoundedCornerShape(6.dp)).background(Color(0xFF222222))) {
+if (ep.still.isNotEmpty()) {
+AsyncImage(model = ep.still, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+}
+Box(
+Modifier.align(Alignment.Center).size(30.dp).clip(CircleShape).background(Color(0xB3000000)),
+contentAlignment = Alignment.Center
+) { Text("▶", color = NetWhite, fontSize = 12.sp) }
+if (progress != null) {
+Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(3.dp).background(Color(0x66FFFFFF))) {
+Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(NetRed))
+}
+}
+}
+
+Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+Text("${ep.number}", color = NetWhite, fontSize = 16.sp, fontWeight = FontWeight.Black)
+Text(
+ep.name.ifEmpty { "Episode ${ep.number}" },
+color = NetWhite, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+maxLines = 1, overflow = TextOverflow.Ellipsis
+)
+}
+Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+if (ep.runtime > 0) Text("${ep.runtime}m", color = NetMuted, fontSize = 12.sp)
+if (ep.air.isNotEmpty()) Text(ep.air, color = NetMuted, fontSize = 12.sp)
+if (progress != null) Text("In progress", color = NetGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+}
+Text(
+ep.overview.ifEmpty { "No description available." },
+color = NetMuted, fontSize = 12.sp, maxLines = 2,
+overflow = TextOverflow.Ellipsis, lineHeight = 16.sp
+)
+}
+
+if (available) {
+Box(Modifier.background(NetRed, RoundedCornerShape(4.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
+Text("READY", color = NetWhite, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+}
+}
+}
+}
+
+@Composable
+private fun EpisodeBrowser(
+film: Film,
+tmdbKey: String,
+episodeFile: (Int, Int) -> Boolean,
+episodeProgress: (Int, Int) -> Float?,
+onEpisode: (Int, Int) -> Unit
+) {
+var seasons by remember(film.id) { mutableStateOf<List<Int>>(emptyList()) }
+var selected by remember(film.id) { mutableStateOf(-1) }
+var episodes by remember(film.id) { mutableStateOf<List<Episode>>(emptyList()) }
+var loading by remember(film.id) { mutableStateOf(false) }
+
+LaunchedEffect(film.id, tmdbKey) {
+if (tmdbKey.isBlank()) return@LaunchedEffect
+val s = Tmdb.seasons(tmdbKey, film.tmdbId)
+seasons = s
+if (s.isNotEmpty()) selected = s.first()
+}
+
+LaunchedEffect(film.id, selected, tmdbKey) {
+if (tmdbKey.isBlank() || selected < 0) { episodes = emptyList(); return@LaunchedEffect }
+loading = true
+episodes = Tmdb.season(tmdbKey, film.tmdbId, selected)
+loading = false
+}
+
+Spacer(Modifier.height(14.dp))
+Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x1FFFFFFF)))
+
+Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 12.dp)) {
+Text("Episodes", color = NetWhite, fontSize = 22.sp, fontWeight = FontWeight.Black)
+if (episodes.isNotEmpty()) Text("${episodes.size} in season", color = NetMuted, fontSize = 13.sp)
+}
+
+if (tmdbKey.isBlank()) {
+Text("Add a TMDB API key in Settings to browse episodes.", color = NetMuted, fontSize = 14.sp)
+return
+}
+
+if (seasons.isNotEmpty()) {
+LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 10.dp)) {
+items(seasons) { s ->
+var f by remember { mutableStateOf(false) }
+val isSel = s == selected
+Box(
+Modifier
+.onFocusChanged { f = it.isFocused }
+.clip(RoundedCornerShape(50.dp))
+.background(if (isSel) NetWhite else Color(0xFF262626))
+.border(1.dp, if (f) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(50.dp))
+.clickable { selected = s }
+.padding(horizontal = 18.dp, vertical = 8.dp)
+) {
+Text(
+if (s == 0) "Specials" else "Season $s",
+color = if (isSel) Color.Black else NetWhite,
+fontSize = 13.sp, fontWeight = FontWeight.Bold
+)
+}
+}
+}
+}
+
+if (loading) {
+Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp)) {
+CircularProgressIndicator(color = NetRed, modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+Text("Loading episodes...", color = NetMuted, fontSize = 13.sp)
+}
+} else if (episodes.isEmpty()) {
+Text("No episode data for this season.", color = NetMuted, fontSize = 14.sp)
+} else {
+Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+episodes.forEach { ep ->
+EpisodeRow(
+ep = ep,
+available = episodeFile(ep.season, ep.number),
+progress = episodeProgress(ep.season, ep.number),
+onClick = { onEpisode(ep.season, ep.number) }
+)
+}
+}
+}
+}
+
 // ---------- Details ----------
 @Composable
 private fun DetailsScreen(
@@ -1147,7 +1381,11 @@ resumeDur: Long,
 isInWatchlist: Boolean,
 tmdbKey: String,
 omdbKey: String,
+libraryReady: Boolean,
+episodeFile: (Int, Int) -> Boolean,
+episodeProgress: (Int, Int) -> Float?,
 onToggleWatchlist: () -> Unit,
+onEpisode: (Int, Int) -> Unit,
 onPlay: (Long) -> Unit,
 onPick: (TbFile, Long) -> Unit,
 onBack: () -> Unit
@@ -1160,7 +1398,7 @@ var imdb by remember(film.id) { mutableStateOf("") }
 LaunchedEffect(film.id) {
 if (omdbKey.isNotBlank() && tmdbKey.isNotBlank()) {
 val r = Tmdb.imdb(tmdbKey, omdbKey, film)
-if (r != null) imdb = r.first
+if (r != null) imdb = r
 }
 }
 
@@ -1269,7 +1507,21 @@ Text("Matching in your TorBox library...", color = NetMuted, fontSize = 14.sp)
 }
 }
 
-if (msg.isNotEmpty()) Text(msg, color = NetMuted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+if (msg.isNotEmpty()) Text(msg, color = NetGold, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+
+// ---- Episode browser (series only), sits under the buttons ----
+if (film.kind == "Series") {
+EpisodeBrowser(
+film = film,
+tmdbKey = tmdbKey,
+episodeFile = episodeFile,
+episodeProgress = episodeProgress,
+onEpisode = onEpisode
+)
+if (!libraryReady) {
+Text("Add your TorBox key to see which episodes are ready.", color = Color(0xFF5A5A5A), fontSize = 12.sp)
+}
+}
 
 if (ordered.isNotEmpty()) {
 Spacer(Modifier.height(10.dp))
@@ -1277,7 +1529,7 @@ Text("${ordered.size} files in your library", color = NetWhite, fontSize = 18.sp
 ordered.forEach { f ->
 val ep = episodeOf(f.name)
 val tag = buildString {
-if (ep != null) append("S%02dE%02d".format(ep.first, ep.second))
+if (ep != null) append(epTag(ep.first, ep.second))
 val q = qualityOf(f.name)
 if (q.isNotEmpty()) { if (isNotEmpty()) append(" · "); append(q) }
 if (isNotEmpty()) append(" · ")

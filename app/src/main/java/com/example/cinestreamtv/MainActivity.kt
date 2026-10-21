@@ -1,3 +1,4 @@
+
 package com.example.cinestreamtv
 
 import android.content.Context
@@ -79,10 +80,8 @@ import java.net.URL
 import java.net.URLEncoder
 import kotlin.math.abs
 
-// ---------- App Meta ----------
 private const val APP_VERSION = "1.6.0"
 
-// ---------- Theme Colors ----------
 private val NetBlack = Color(0xFF0B0B0B)
 private val NetDarkGray = Color(0xFF1F1F1F)
 private val NetRed = Color(0xFFE50914)
@@ -90,7 +89,6 @@ private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF9A9A9A)
 private val NetGold = Color(0xFFD4AF37)
 
-// ---------- Data Models ----------
 data class Film(
     val id: String,
     val tmdbId: Int,
@@ -148,7 +146,6 @@ data class Catalog(
 private val Resume.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
 private val PlayReq.key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
 
-// ---------- Savers ----------
 private val FilmSaver: Saver<Film?, Any> = Saver(
     save = { f ->
         f?.let {
@@ -179,14 +176,12 @@ private val PlayReqSaver: Saver<PlayReq?, Any> = Saver(
     }
 )
 
-// ---------- Helpers ----------
 private fun poster(path: String) = "https://image.tmdb.org/t/p/w500$path"
 private fun wide(path: String) = "https://image.tmdb.org/t/p/w1280$path"
 
 private val NON_ALNUM = Regex("[^a-z0-9]+")
 private fun norm(s: String) = s.lowercase().replace(NON_ALNUM, " ").trim()
 
-// Compiled once, not per call.
 private val EP = Regex("(?i)s(\\d{1,2})[ ._-]?e(\\d{1,3})|(?<![0-9])(\\d{1,2})x(\\d{1,3})")
 private val QUALITY = Regex("(?i)(2160p|1440p|1080p|720p|480p|4k)")
 
@@ -207,22 +202,14 @@ private fun episodeOf(name: String): Pair<Int, Int>? {
 private fun qualityOf(name: String): String =
     QUALITY.find(name)?.value?.lowercase()?.replace("4k", "2160p")?.uppercase() ?: ""
 
-/** Everything before the SxxExx marker, junk tokens stripped. Used for title matching. */
 private fun titleKey(fileName: String): String =
     norm(fileName.substringBefore(EP).ifEmpty { fileName })
         .split(' ')
-        .filter { it.isNotEmpty() && it !in JUNK && it.length < 5 || it in JUNK.not() && it.isNotEmpty() }
-        .filterNot { it in JUNK }
+        .filter { it.isNotEmpty() && it !in JUNK }
         .joinToString(" ")
 
-/** Space-free alphanumeric form, for tolerant comparison. */
 private fun squash(s: String) = norm(s).replace(" ", "")
 
-/**
- * True when [fileTitle] plausibly belongs to [show]. Space-free containment catches
- * punctuation differences ("Marvel's Daredevil" vs "Marvels.Daredevil") while staying
- * strict enough that short titles like "You" don't match everything.
- */
 private fun titleMatches(show: String, fileTitle: String): Boolean {
     val s = squash(show)
     val f = squash(fileTitle)
@@ -292,7 +279,6 @@ private fun buildFallbackRows(all: List<Film>): List<Pair<String, List<Film>>> {
     return out
 }
 
-// ---------- Prefs ----------
 private fun loadResume(p: SharedPreferences): List<Resume> = try {
     val arr = JSONArray(p.getString("resume", "[]"))
     (0 until arr.length()).map {
@@ -324,7 +310,6 @@ private fun saveWatchlist(p: SharedPreferences, list: List<Film>) {
     p.edit().putString("watchlist", arr.toString()).apply()
 }
 
-// ---------- Catalog Disk Cache ----------
 private object Cache {
     private const val KEY = "catalog_cache_v2"
     private const val MAX_PER_ROW = 24
@@ -369,7 +354,6 @@ private object Cache {
     } catch (_: Exception) { null }
 }
 
-// ---------- HTTP ----------
 private fun httpGet(urlStr: String, bearer: String? = null): String {
     val c = URL(urlStr).openConnection() as HttpURLConnection
     c.connectTimeout = 15000
@@ -387,7 +371,6 @@ private fun httpGet(urlStr: String, bearer: String? = null): String {
     } finally { c.disconnect() }
 }
 
-// ---------- TMDB ----------
 private data class RowSpec(
     val label: String,
     val paths: List<Pair<String, String>>,
@@ -399,7 +382,6 @@ private object Tmdb {
     private const val REGION = "US"
     private const val PAGES = 3
 
-    /** Caps concurrent sockets so a cold launch doesn't open ~64 at once. */
     private val gate = Semaphore(10)
 
     val providers = listOf(
@@ -430,7 +412,6 @@ private object Tmdb {
     )
 
     private fun call(path: String, key: String): String {
-        // v4 read tokens are JWTs and go in the Authorization header; v3 keys go in the query.
         val sep = if (path.contains("?")) "&" else "?"
         return if (key.contains('.')) httpGet("$BASE$path", key)
         else httpGet("$BASE$path${sep}api_key=$key")
@@ -543,8 +524,6 @@ private object Tmdb {
             specs.map { spec -> async { gate.withPermit { fetchRow(key, spec) } } }.awaitAll()
         }.filter { it.second.isNotEmpty() }
 
-        // Merge, preferring the copy that carries a provider label so trending/hero
-        // titles get one whenever they also appear on a provider row.
         val all = LinkedHashMap<String, Film>()
         fetched.forEach { (_, list) ->
             list.forEach { f ->
@@ -610,7 +589,6 @@ private object Tmdb {
     }
 }
 
-// ---------- TorBox ----------
 private object Tb {
     private const val BASE = "https://api.torbox.app/v1/api"
     private val VIDEO = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".ts")
@@ -722,8 +700,6 @@ fun NetCleanApp() {
     val resume = remember { mutableStateListOf<Resume>().also { it.addAll(loadResume(prefs)) } }
     val watchlist = remember { mutableStateListOf<Film>().also { it.addAll(loadWatchlist(prefs)) } }
 
-    // Library lookups are precomputed once per library change instead of being re-derived
-    // with regex work inside every episode row's composition.
     val libByEpisode = remember(library) {
         val m = HashMap<Pair<Int, Int>, MutableList<TbFile>>()
         for (f in library) {
@@ -775,7 +751,6 @@ fun NetCleanApp() {
     fun filesForShow(show: Film): List<TbFile> =
         library.filter { titleMatches(show.name, libTitle[it] ?: "") }
 
-    // --- Catalog load. Debounced so typing an API key doesn't fire ~70 requests per keystroke.
     LaunchedEffect(tmdbKey, catalogNonce) {
         val key = tmdbKey.trim()
         if (key.isBlank()) {
@@ -865,11 +840,6 @@ fun NetCleanApp() {
                             libraryReady = library.isNotEmpty(),
                             resumeSnapshot = resume.toList(),
                             episodeFile = { s, n -> fileForEpisode(d, s, n) != null },
-                            episodeProgress = { s, n ->
-                                resume.firstOrNull { it.filmId == d.id && episodeOf(it.name) == (s to n) }
-                                    ?.takeIf { it.dur > 0 }
-                                    ?.let { (it.pos.toFloat() / it.dur.toFloat()).coerceIn(0f, 1f) }
-                            },
                             onToggleWatchlist = {
                                 if (isInWatchlist) watchlist.removeAll { it.id == d.id } else watchlist.add(d)
                                 saveWatchlist(prefs, watchlist)
@@ -989,7 +959,6 @@ fun NetCleanApp() {
     }
 }
 
-// ---------- Top Navigation ----------
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
     Box(
@@ -1022,8 +991,6 @@ private fun CapsuleNavItem(label: String, isCurrent: Boolean, onClick: () -> Uni
     val requester = remember { FocusRequester() }
     val scale by animateFloatAsState(if (focused) 1.07f else 1f, label = "navScale")
 
-    // White pill only while focused. The current tab is signalled by brighter text only,
-    // so Home is no longer lit up while you're sitting somewhere else.
     val textColor = when {
         focused -> Color.Black
         isCurrent -> NetWhite
@@ -1050,7 +1017,6 @@ private fun CapsuleNavItem(label: String, isCurrent: Boolean, onClick: () -> Uni
     }
 }
 
-// ---------- Shared Components ----------
 @Composable
 private fun NetCard(
     modifier: Modifier = Modifier,
@@ -1076,7 +1042,7 @@ private fun NetCard(
 }
 
 @Composable
-private fun RemoveBadge(focusedParent: Boolean, onRemove: () -> Unit, modifier: Modifier = Modifier) {
+private fun RemoveBadge(onRemove: () -> Unit, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     Box(
         modifier
@@ -1130,7 +1096,7 @@ private fun PosterCard(
             }
         }
         if (onRemove != null) {
-            RemoveBadge(focused, onRemove, Modifier.align(Alignment.TopEnd).padding(6.dp))
+            RemoveBadge(onRemove, Modifier.align(Alignment.TopEnd).padding(6.dp))
         }
     }
 }
@@ -1166,7 +1132,7 @@ private fun ResumeCard(r: Resume, onClick: () -> Unit, onRemove: () -> Unit) {
                 Box(Modifier.fillMaxWidth(frac).fillMaxHeight().background(NetRed))
             }
         }
-        RemoveBadge(false, onRemove, Modifier.align(Alignment.TopEnd).padding(6.dp))
+        RemoveBadge(onRemove, Modifier.align(Alignment.TopEnd).padding(6.dp))
     }
 }
 
@@ -1249,7 +1215,6 @@ private fun HeroContent(film: Film, onOpen: () -> Unit) {
     }
 }
 
-// ---------- Home ----------
 @Composable
 private fun HomeScreen(
     catalog: Catalog,
@@ -1270,8 +1235,6 @@ private fun HomeScreen(
     val heroPx = with(LocalDensity.current) { heroHeight.toPx() }
     val listState = rememberLazyListState()
 
-    // Only alpha is driven by scroll now. No counter-translation, so the backdrop no
-    // longer fights the list while you scroll.
     val heroAlpha by remember {
         derivedStateOf {
             val offset = if (listState.firstVisibleItemIndex > 0) heroPx
@@ -1376,7 +1339,6 @@ private fun HomeScreen(
     }
 }
 
-// ---------- Provider Hub ----------
 private val providerColors = mapOf(
     "Netflix" to Color(0xFF661111),
     "Disney+" to Color(0xFF113366),
@@ -1423,7 +1385,6 @@ private fun ProviderHubScreen(title: String, subtitle: String, available: List<S
     }
 }
 
-// ---------- My List ----------
 @Composable
 private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit, onRemove: (Film) -> Unit) {
     Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 12.dp, bottom = 24.dp)) {
@@ -1448,7 +1409,6 @@ private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit, onRemove
     }
 }
 
-// ---------- Provider Catalog ----------
 @Composable
 private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(start = 32.dp, end = 32.dp, top = 12.dp, bottom = 24.dp)) {
@@ -1523,7 +1483,6 @@ private fun SearchScreen(
     }
 }
 
-// ---------- Settings ----------
 @Composable
 private fun SettingsScreen(
     torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: String,
@@ -1574,7 +1533,6 @@ private fun SettingsScreen(
     }
 }
 
-// ---------- Episode Row ----------
 @Composable
 private fun EpisodeRow(ep: Episode, available: Boolean, progress: Float?, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
@@ -1637,7 +1595,6 @@ private fun EpisodeRow(ep: Episode, available: Boolean, progress: Float?, onClic
     }
 }
 
-// ---------- Details ----------
 @Composable
 private fun DetailsScreen(
     film: Film,
@@ -1652,7 +1609,6 @@ private fun DetailsScreen(
     libraryReady: Boolean,
     resumeSnapshot: List<Resume>,
     episodeFile: (Int, Int) -> Boolean,
-    episodeProgress: (Int, Int) -> Float?,
     onToggleWatchlist: () -> Unit,
     onEpisode: (Int, Int) -> Unit,
     onPlay: (Long) -> Unit,
@@ -1672,7 +1628,14 @@ private fun DetailsScreen(
         }
     }
 
-    // Episode state lives here so the whole screen can be one LazyColumn.
+    val progressByEp = remember(resumeSnapshot, film.id) {
+        resumeSnapshot.filter { it.filmId == film.id && it.dur > 0 }
+            .mapNotNull { r ->
+                episodeOf(r.name)?.let { ep -> ep to (r.pos.toFloat() / r.dur.toFloat()).coerceIn(0f, 1f) }
+            }
+            .toMap()
+    }
+
     var seasons by remember(film.id) { mutableStateOf<List<Int>>(emptyList()) }
     var selectedSeason by rememberSaveable(film.id) { mutableStateOf(-1) }
     var episodes by remember(film.id) { mutableStateOf<List<Episode>>(emptyList()) }
@@ -1876,7 +1839,7 @@ private fun DetailsScreen(
                         EpisodeRow(
                             ep = ep,
                             available = episodeFile(ep.season, ep.number),
-                            progress = episodeProgress(ep.season, ep.number),
+                            progress = progressByEp[ep.season to ep.number],
                             onClick = { onEpisode(ep.season, ep.number) }
                         )
                     }
@@ -1930,7 +1893,6 @@ private fun DetailsScreen(
     }
 }
 
-// ---------- Player ----------
 @Composable
 private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Long) -> Unit, onExit: () -> Unit) {
     val context = LocalContext.current
@@ -1939,7 +1901,6 @@ private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Lon
     var buffering by remember(req) { mutableStateOf(true) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
 
-    // Back hides the controls first; only a second Back leaves the player.
     BackHandler {
         val pv = playerView
         if (pv != null && pv.isControllerVisible) pv.hideController() else onExit()
@@ -2000,7 +1961,6 @@ private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Lon
         }
     }
 
-    // Coming back from background resumes only if it was actually playing.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, exo) {
         var wasPlaying = true
@@ -2051,3 +2011,4 @@ private fun PlayerScreen(req: PlayReq, torboxKey: String, onProgress: (Long, Lon
         }
     }
 }
+```

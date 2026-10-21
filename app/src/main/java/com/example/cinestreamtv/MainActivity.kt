@@ -10,7 +10,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -477,7 +476,13 @@ onBack = { detail = null }
 )
 }
 
-prov != null -> {
+// Nav lives in normal layout flow here, so it can never cover
+// the scrolling content or fight it for input.
+else -> Column(Modifier.fillMaxSize().background(NetBlack)) {
+NetTopNav(current = screen) { screen = it; selectedProvider = null }
+
+Box(Modifier.fillMaxWidth().weight(1f)) {
+if (prov != null) {
 val kindFilter = if (screen == "Shows") "Series" else "Movie"
 val row = catalog.rows.firstOrNull { it.first == prov }?.second
 ?: catalog.all.filter { it.provider == prov }
@@ -486,9 +491,8 @@ providerName = prov, kind = kindFilter,
 catalog = row.filter { it.kind == kindFilter },
 onFilm = { open(it) }, onBack = { selectedProvider = null }
 )
-}
-
-else -> when (screen) {
+} else {
+when (screen) {
 "Home" -> HomeScreen(
 catalog = catalog.all, rows = catalog.rows, resume = resume,
 loading = homeLoading, error = homeError,
@@ -515,30 +519,24 @@ link = linkText, onLink = { linkText = it }, onPlayLink = { if (linkText.startsW
 )
 }
 }
-
-// ---- Global top nav: always on top, never scrolls, never covered ----
-if (p == null && d == null) {
-Box(Modifier.align(Alignment.TopCenter)) {
-NetTopNav(current = screen) { screen = it; selectedProvider = null }
+}
 }
 }
 }
 }
 }
 
-// ---------- Netflix Capsule Top Navigation Bar ----------
+// ---------- Top Navigation Bar ----------
 @Composable
 private fun NetTopNav(current: String, onNav: (String) -> Unit) {
 Box(
-Modifier
-.fillMaxWidth()
-.padding(top = 22.dp, bottom = 12.dp),
+Modifier.fillMaxWidth().padding(vertical = 10.dp),
 contentAlignment = Alignment.Center
 ) {
 Row(
 modifier = Modifier
 .clip(RoundedCornerShape(50.dp))
-.background(Color(0xFF222222).copy(alpha = 0.94f))
+.background(Color(0xFF222222))
 .border(1.dp, Color(0xFF444444), RoundedCornerShape(50.dp))
 .padding(horizontal = 6.dp, vertical = 6.dp),
 verticalAlignment = Alignment.CenterVertically,
@@ -557,16 +555,21 @@ CapsuleNavItem(label = "Settings", isSelected = current == "Settings") { onNav("
 @Composable
 private fun CapsuleNavItem(label: String, isSelected: Boolean, onClick: () -> Unit) {
 var focused by remember { mutableStateOf(false) }
+val requester = remember { FocusRequester() }
 val active = isSelected || focused
 
 Box(
 modifier = Modifier
-.scale(if (focused) 1.06f else 1f)
 .onFocusChanged { focused = it.isFocused }
+.scale(if (focused) 1.06f else 1f)
 .clip(RoundedCornerShape(50.dp))
 .background(if (active) NetWhite else Color.Transparent)
-.focusable()
-.clickable(onClick = onClick)
+.focusRequester(requester)
+.clickable {
+// Keep focus in sync with selection on both remote and touch.
+runCatching { requester.requestFocus() }
+onClick()
+}
 .padding(horizontal = 18.dp, vertical = 8.dp),
 contentAlignment = Alignment.Center
 ) {
@@ -593,7 +596,6 @@ modifier
 .clip(RoundedCornerShape(6.dp))
 .background(NetDarkGray)
 .then(if (focused) Modifier.border(3.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
-.focusable()
 .clickable(onClick = onClick)
 ) {
 content(this, focused)
@@ -640,10 +642,10 @@ if (list.isEmpty()) return
 Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
 Text(
 title, color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
 )
 LazyRow(
-contentPadding = PaddingValues(horizontal = 48.dp),
+contentPadding = PaddingValues(horizontal = 24.dp),
 horizontalArrangement = Arrangement.spacedBy(14.dp)
 ) {
 items(list, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
@@ -664,7 +666,6 @@ modifier = Modifier
 .clip(RoundedCornerShape(6.dp))
 .background(if (focused) NetWhite else base)
 .then(if (focused) Modifier.border(2.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
-.focusable()
 .clickable(onClick = onClick)
 .padding(horizontal = 22.dp),
 contentAlignment = Alignment.Center
@@ -683,7 +684,7 @@ val requester = remember { FocusRequester() }
 Box(
 Modifier
 .fillMaxWidth()
-.height(430.dp)
+.height(380.dp)
 .background(NetBlack)
 ) {
 if (film.backdrop.isNotEmpty()) {
@@ -692,11 +693,11 @@ model = film.backdrop, contentDescription = film.name,
 modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop
 )
 }
-Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.75f), Color.Transparent, NetBlack), startY = 0f, endY = 430f)))
-Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.92f), Color.Transparent), endX = 720f)))
+Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent, NetBlack), startY = 0f, endY = 380f)))
+Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.92f), Color.Transparent), endX = 700f)))
 
 Column(
-Modifier.align(Alignment.BottomStart).padding(start = 48.dp, bottom = 32.dp).width(620.dp),
+Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 28.dp).width(600.dp),
 verticalArrangement = Arrangement.spacedBy(10.dp)
 ) {
 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -705,7 +706,7 @@ Box(Modifier.background(NetRed, RoundedCornerShape(2.dp)).padding(horizontal = 6
 Text(film.provider, color = NetWhite, fontSize = 11.sp, fontWeight = FontWeight.Bold)
 }
 }
-Text(film.name, color = NetWhite, fontSize = 42.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+Text(film.name, color = NetWhite, fontSize = 40.sp, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
 
 Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
 Text(film.year, color = NetMuted, fontSize = 13.sp)
@@ -728,8 +729,8 @@ HeroButton("ⓘ More Info", filled = false, onClick = onOpen)
 }
 
 LaunchedEffect(Unit) {
-delay(180)
-try { requester.requestFocus() } catch (_: Exception) {}
+delay(250)
+runCatching { requester.requestFocus() }
 }
 }
 
@@ -754,10 +755,10 @@ item(key = "resume") {
 Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
 Text(
 "Continue Watching", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
 )
 LazyRow(
-contentPadding = PaddingValues(horizontal = 48.dp),
+contentPadding = PaddingValues(horizontal = 24.dp),
 horizontalArrangement = Arrangement.spacedBy(14.dp)
 ) {
 items(resume, key = { it.key }) { r -> ResumeCard(r) { onResume(r) } }
@@ -768,12 +769,16 @@ items(resume, key = { it.key }) { r -> ResumeCard(r) { onResume(r) } }
 
 if (error.isNotEmpty()) {
 item(key = "err") {
-Text(error, color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 48.dp, top = 8.dp))
+Text(error, color = NetMuted, fontSize = 13.sp, modifier = Modifier.padding(start = 24.dp, top = 8.dp))
 }
 }
 if (loading) {
 item(key = "loading") {
-Row(Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+Row(
+Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
+verticalAlignment = Alignment.CenterVertically,
+horizontalArrangement = Arrangement.spacedBy(12.dp)
+) {
 CircularProgressIndicator(color = NetRed, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
 Text("Loading catalog...", color = NetMuted, fontSize = 13.sp)
 }
@@ -784,10 +789,10 @@ item(key = "trending") {
 Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
 Text(
 "Trending Now", color = NetWhite, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+modifier = Modifier.padding(start = 24.dp, bottom = 8.dp)
 )
 LazyRow(
-contentPadding = PaddingValues(horizontal = 48.dp),
+contentPadding = PaddingValues(horizontal = 24.dp),
 horizontalArrangement = Arrangement.spacedBy(14.dp)
 ) {
 items(catalog.take(20), key = { it.id }) { f -> PosterCard(f, showProvider = true) { onFilm(f) } }
@@ -814,7 +819,7 @@ private val providerColors = mapOf(
 
 @Composable
 private fun ProviderHubScreen(title: String, available: List<String>, onSelect: (String) -> Unit) {
-Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 24.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp)) {
 Text(title, color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
 
 LazyVerticalGrid(
@@ -834,7 +839,6 @@ modifier = Modifier
 .clip(RoundedCornerShape(12.dp))
 .background(providerColors[label] ?: Color(0xFF222222))
 .border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x33FFFFFF), RoundedCornerShape(12.dp))
-.focusable()
 .clickable { onSelect(label) },
 contentAlignment = Alignment.Center
 ) {
@@ -851,7 +855,7 @@ Text("$label Collection", color = NetMuted, fontSize = 13.sp, fontWeight = FontW
 // ---------- My List / Watchlist Screen ----------
 @Composable
 private fun MyListScreen(watchlist: List<Film>, onFilm: (Film) -> Unit) {
-Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 24.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp)) {
 Text("My Watchlist", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(bottom = 20.dp))
 
 if (watchlist.isEmpty()) {
@@ -874,7 +878,7 @@ items(watchlist, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
 // ---------- Provider Dedicated Catalog Screen ----------
 @Composable
 private fun ProviderCatalogScreen(providerName: String, kind: String, catalog: List<Film>, onFilm: (Film) -> Unit, onBack: () -> Unit) {
-Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 24.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp)) {
 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(bottom = 20.dp)) {
 var focused by remember { mutableStateOf(false) }
 Box(
@@ -884,7 +888,6 @@ modifier = Modifier
 .clip(RoundedCornerShape(6.dp))
 .background(NetDarkGray)
 .border(2.dp, if (focused) NetWhite else Color.Transparent, RoundedCornerShape(6.dp))
-.focusable()
 .clickable(onClick = onBack)
 .padding(horizontal = 16.dp, vertical = 8.dp)
 ) {
@@ -914,7 +917,7 @@ items(catalog, key = { it.id }) { f -> PosterCard(f) { onFilm(f) } }
 private fun SearchScreen(
 query: String, onQuery: (String) -> Unit, results: List<Film>, searching: Boolean, onFilm: (Film) -> Unit
 ) {
-Column(Modifier.fillMaxSize().padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 16.dp)) {
+Column(Modifier.fillMaxSize().padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp)) {
 OutlinedTextField(
 value = query, onValueChange = onQuery, singleLine = true,
 label = { Text("Search title, genre...") },
@@ -951,7 +954,7 @@ torboxKey: String, onTorbox: (String) -> Unit, onTest: () -> Unit, tbStatus: Str
 tmdbKey: String, onTmdb: (String) -> Unit, link: String, onLink: (String) -> Unit, onPlayLink: () -> Unit
 ) {
 Column(
-Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 80.dp, start = 48.dp, end = 48.dp, bottom = 16.dp),
+Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 16.dp),
 verticalArrangement = Arrangement.spacedBy(12.dp)
 ) {
 Text("App Settings", color = NetWhite, fontSize = 24.sp, fontWeight = FontWeight.Bold)
@@ -1016,17 +1019,17 @@ AsyncImage(model = film.backdrop, contentDescription = null, modifier = Modifier
 Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.9f), NetBlack.copy(alpha = 0.4f)))))
 
 Column(
-Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 56.dp, vertical = 48.dp),
+Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 32.dp, vertical = 40.dp),
 verticalArrangement = Arrangement.spacedBy(16.dp)
 ) {
-Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 var bFocused by remember { mutableStateOf(false) }
 Box(
 Modifier
 .onFocusChanged { bFocused = it.isFocused }
 .clip(RoundedCornerShape(6.dp))
 .background(if (bFocused) Color(0xFF333333) else Color.Transparent)
-.focusable().clickable(onClick = onBack)
+.clickable(onClick = onBack)
 .padding(horizontal = 10.dp, vertical = 4.dp)
 ) { Text("← Back", color = NetWhite, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
 
@@ -1036,7 +1039,7 @@ Text(film.provider, color = NetWhite, fontSize = 12.sp, fontWeight = FontWeight.
 }
 }
 
-Text(film.name, color = NetWhite, fontSize = 42.sp, fontWeight = FontWeight.Black)
+Text(film.name, color = NetWhite, fontSize = 40.sp, fontWeight = FontWeight.Black)
 
 Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
 if (film.rating.isNotEmpty()) {
@@ -1050,7 +1053,6 @@ Text(film.overview, color = NetWhite, fontSize = 15.sp, maxLines = 4, lineHeight
 
 Spacer(Modifier.height(8.dp))
 
-// Play / Resume Button
 var playFocused by remember { mutableStateOf(false) }
 Box(
 modifier = Modifier
@@ -1061,7 +1063,6 @@ modifier = Modifier
 .clip(RoundedCornerShape(6.dp))
 .background(if (playFocused) NetWhite else Color(0xFFE5E5E5))
 .then(if (playFocused) Modifier.border(2.5.dp, NetWhite, RoundedCornerShape(6.dp)) else Modifier)
-.focusable()
 .clickable { if (!busy) onPlay(resumePos) },
 contentAlignment = Alignment.CenterStart
 ) {
@@ -1079,7 +1080,6 @@ Text(if (busy) "Loading..." else buttonText, color = Color.Black, fontSize = 16.
 }
 }
 
-// Add to Watchlist Button
 var listFocused by remember { mutableStateOf(false) }
 Box(
 modifier = Modifier
@@ -1090,7 +1090,6 @@ modifier = Modifier
 .clip(RoundedCornerShape(6.dp))
 .background(if (listFocused) Color(0xFF444444) else Color(0xFF2B2B2B))
 .border(if (listFocused) 2.dp else 1.dp, if (listFocused) NetWhite else Color(0x55FFFFFF), RoundedCornerShape(6.dp))
-.focusable()
 .clickable(onClick = onToggleWatchlist),
 contentAlignment = Alignment.Center
 ) {

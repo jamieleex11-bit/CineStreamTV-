@@ -89,6 +89,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -651,7 +652,12 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
         episodesJob?.cancel()
         episodesJob = viewModelScope.launch {
             TmdbRepository.loadEpisodes(apiKey, film, season)
-                .onSuccess { episodes -> _detail.update { if (it.season == season) it.copy(episodes = episodes) } }
+                .onSuccess { episodes ->
+                    _detail.update {
+                        // an if-without-else here returns Unit and breaks the (T) -> T contract
+                        if (it.season == season) it.copy(episodes = episodes) else it
+                    }
+                }
                 .onFailure { _detail.update { it.copy(episodes = emptyList()) } }
         }
     }
@@ -898,15 +904,17 @@ class MainActivity : ComponentActivity() {
             // FIX: exactly one debounce, in one place. The old code delayed inside
             // the ViewModel *and* relaunched this effect on every keystroke.
             LaunchedEffect(Unit) {
-                var previous = settings.tmdbKey
+                var previous = settings.tmdbKey.trim()
                 viewModel.loadCatalog(previous)
+
+                // THE single debounce. collectLatest cancels an in-flight delay when
+                // the key changes again, so typing never queues a pile of requests.
                 snapshotFlow { settings.tmdbKey }
-                    .collect { current ->
-                        if (current.trim() != previous.trim()) {
-                            previous = current
-                            delay(600)
-                            viewModel.loadCatalog(current)
-                        }
+                    .collectLatest { current ->
+                        if (current.trim() == previous) return@collectLatest
+                        previous = current.trim()
+                        delay(600)
+                        viewModel.loadCatalog(current)
                     }
             }
 

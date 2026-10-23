@@ -71,7 +71,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -83,6 +82,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -300,7 +300,9 @@ internal class AppStorage(private val prefs: SharedPreferences) {
 private object Http {
 
     /** Carries the server's own message so a bad key does not look like an outage. */
-    class HttpException(val statusCode: Int, message: String) : Exception(message)
+    /** `detail` is deliberately non-null: Throwable.message is String? and that
+     *  propagated into readableError() as a type error. */
+    class HttpException(val statusCode: Int, val detail: String) : Exception(detail)
 
     fun get(url: String, bearerToken: String? = null): String {
         val connection = URL(url).openConnection() as HttpURLConnection
@@ -763,6 +765,14 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
         _playRequest.value = null
     }
 
+    /** Cancels every running job; called when the composable hosting us leaves. */
+    fun shutdown() {
+        catalogJob?.cancel()
+        searchJob?.cancel()
+        episodesJob?.cancel()
+        viewModelScope.cancel()
+    }
+
     /** FIX: ignores unknown durations so the resume bar never resets to zero. */
     fun saveProgress(request: PlayRequest, positionMs: Long, durationMs: Long) {
         if (positionMs < 3_000L) return
@@ -874,7 +884,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
     }
 
     private fun readableError(error: Throwable, fallback: String): String = when (error) {
-        is Http.HttpException -> error.message
+        is Http.HttpException -> error.detail
         is IllegalStateException -> error.message ?: fallback
         is IllegalArgumentException -> error.message ?: fallback
         else -> fallback
@@ -898,7 +908,7 @@ class MainActivity : ComponentActivity() {
             val storage = remember {
                 AppStorage(context.getSharedPreferences("cinestream", Context.MODE_PRIVATE))
             }
-            val viewModel: AppViewModel = viewModel { AppViewModel(storage) }
+            val viewModel = rememberAppViewModel(storage)
             val settings by viewModel.settings.collectAsState()
 
             // FIX: exactly one debounce, in one place. The old code delayed inside
@@ -1033,6 +1043,19 @@ private fun CineStreamApp(viewModel: AppViewModel) {
     }
 }
 
+/**
+ * Replaces androidx.lifecycle.viewmodel.compose.viewModel so this file does not
+ * require that artifact. Same semantics for a single-activity app: created once
+ * per composition lifetime, coroutines cancelled when it leaves composition.
+ */
+@Composable
+private fun rememberAppViewModel(store: AppStorage): AppViewModel {
+    val viewModel = remember { AppViewModel(store) }
+    DisposableEffect(Unit) {
+        onDispose { viewModel.shutdown() }
+    }
+    return viewModel
+}
 // ============================= Reusable UI =============================
 
 @Composable
@@ -1742,21 +1765,25 @@ private fun PlayerScreen(
         val builder = MediaItem.Builder().setUri(streamUrl)
         if (mimeType != null) builder.setMimeType(mimeType)
 
-        ExoPlayer.Builder(context).build().apply {
-            setMediaItem(builder.build(), request.startPositionMs)
-            // FIX: audio focus + pause on unplug (the old build played over everything).
-            setAudioAttributes(
+        // FIX: these three options live on ExoPlayer.Builder. setHandleAudioBecomingNoisy
+        // and setKeepContentOnPlayerReset are setter-only there, so they cannot be written
+        // as Kotlin property assignments and must not be called on the built player.
+        ExoPlayer.Builder(context)
+            .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
                     .build(),
                 /* handleAudioFocus = */ true
             )
-            handleAudioBecomingNoisy = true
-            setKeepContentOnPlayerReset(true)
-            prepare()
-            playWhenReady = true
-        }
+            .setHandleAudioBecomingNoisy(true)
+            .setKeepContentOnPlayerReset(true)
+            .build()
+            .apply {
+                setMediaItem(builder.build(), request.startPositionMs)
+                prepare()
+                playWhenReady = true
+            }
     }
 
     DisposableEffect(exoPlayer) {

@@ -388,7 +388,7 @@ private object Http {
             connection.connectTimeout = 12_000
             connection.readTimeout = 18_000
             connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty("User-Agent", "CineStreamTV/2.0")
+            connection.setRequestProperty("User-Agent", "MollyTV/2.0")
             if (!bearerToken.isNullOrBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer $bearerToken")
             }
@@ -1423,7 +1423,11 @@ private fun NetflixTopNavBar(
             .padding(horizontal = 48.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Label("NETFLIX", 28, NetRed, FontWeight.Black, tracking = -0.8f)
+        // MollyTV wordmark: "Molly" in white, "TV" in red, tight together.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Label("Molly", 28, NetWhite, FontWeight.Black, tracking = -1f)
+            Label("TV", 28, NetRed, FontWeight.Black, tracking = -1f)
+        }
 
         Spacer(Modifier.width(28.dp))
 
@@ -2429,9 +2433,10 @@ private fun DetailsScreen(
 
             Spacer(Modifier.height(4.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // -- Primary action, on its own line. --
                 TvFocusable(
-                    modifier = Modifier.width(230.dp).height(54.dp),
+                    modifier = Modifier.width(260.dp).height(56.dp),
                     shape = RoundedCornerShape(6.dp),
                     scale = 1.04f,
                     border = false,
@@ -2467,14 +2472,15 @@ private fun DetailsScreen(
                                 hasProgress -> "Resume"
                                 else -> "Play"
                             },
-                            16, Color.Black, FontWeight.Bold
+                            17, Color.Black, FontWeight.Bold
                         )
                     }
                 }
 
+                // -- Episodes sits directly beneath Play, the way Netflix does it. --
                 if (film.kind == "Series") {
                     TvFocusable(
-                        modifier = Modifier.width(200.dp).height(54.dp),
+                        modifier = Modifier.width(260.dp).height(50.dp),
                         shape = RoundedCornerShape(6.dp),
                         scale = 1.04f,
                         border = false,
@@ -2488,62 +2494,67 @@ private fun DetailsScreen(
                         ) {
                             Label(
                                 if (state.showEpisodes) "\u2303" else "\u2304",
-                                15, NetWhite, FontWeight.Bold
+                                15,
+                                if (state.showEpisodes) NetRed else NetWhite,
+                                FontWeight.Bold
                             )
                             Label(
                                 if (state.showEpisodes) "Hide Episodes" else "Episodes",
-                                14, NetWhite, FontWeight.SemiBold
+                                15, NetWhite, FontWeight.SemiBold
                             )
                         }
                     }
                 }
 
-                TvFocusable(
-                    modifier = Modifier.width(200.dp).height(54.dp),
-                    shape = RoundedCornerShape(6.dp),
-                    scale = 1.04f,
-                    border = false,
-                    bg = { focused -> if (focused) Color(0xFF4A4A56) else Color(0x99262630) },
-                    onClick = onFindFiles
-                ) {
-                    Row(
-                        Modifier.align(Alignment.Center),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(9.dp)
+                // -- Secondary actions, side by side on the last line. --
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvFocusable(
+                        modifier = Modifier.width(230.dp).height(50.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        scale = 1.04f,
+                        border = false,
+                        bg = { focused -> if (focused) Color(0xFF4A4A56) else Color(0x99262630) },
+                        onClick = onFindFiles
                     ) {
-                        Label("\uD83D\uDD0D", 14, NetWhite)
-                        Label("Find in TorBox", 14, NetWhite, FontWeight.SemiBold)
-                    }
-                }
-
-                TvFocusable(
-                    modifier = Modifier.width(160.dp).height(54.dp),
-                    shape = RoundedCornerShape(6.dp),
-                    scale = 1.04f,
-                    bg = { focused ->
-                        when {
-                            focused -> Color(0xFF4A4A56)
-                            isInWatchlist -> Color(0x66FFFFFF)
-                            else -> Color(0x55222222)
+                        Row(
+                            Modifier.align(Alignment.Center),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(9.dp)
+                        ) {
+                            Label("\uD83D\uDD0D", 14, NetWhite)
+                            Label("Find in TorBox", 14, NetWhite, FontWeight.SemiBold)
                         }
-                    },
-                    onClick = onToggleWatchlist
-                ) {
-                    Row(
-                        Modifier.align(Alignment.Center),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(7.dp)
+                    }
+
+                    TvFocusable(
+                        modifier = Modifier.width(170.dp).height(50.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        scale = 1.04f,
+                        bg = { focused ->
+                            when {
+                                focused -> Color(0xFF4A4A56)
+                                isInWatchlist -> Color(0x66FFFFFF)
+                                else -> Color(0x55222222)
+                            }
+                        },
+                        onClick = onToggleWatchlist
                     ) {
-                        Label(
-                            if (isInWatchlist) "\u2713" else "+",
-                            15,
-                            if (isInWatchlist) NetGreen else NetWhite,
-                            FontWeight.Bold
-                        )
-                        Label(
-                            if (isInWatchlist) "In My List" else "My List",
-                            14, NetWhite, FontWeight.Bold
-                        )
+                        Row(
+                            Modifier.align(Alignment.Center),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
+                        ) {
+                            Label(
+                                if (isInWatchlist) "\u2713" else "+",
+                                15,
+                                if (isInWatchlist) NetGreen else NetWhite,
+                                FontWeight.Bold
+                            )
+                            Label(
+                                if (isInWatchlist) "In My List" else "My List",
+                                14, NetWhite, FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -3432,7 +3443,7 @@ private fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Label("\u2764  Made by Jamie", 16, JamieGold, FontWeight.Black)
-            Label("CineStream TV \u2022 Google TV & Android TV Edition", 11, NetMuted)
+            Label("MollyTV \u2022 Google TV & Android TV Edition", 11, NetMuted)
         }
     }
 }

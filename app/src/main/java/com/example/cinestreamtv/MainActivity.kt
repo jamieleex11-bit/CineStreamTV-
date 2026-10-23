@@ -1830,5 +1830,3 @@ private fun PlayerScreen(
             }
         }
     }
-}
-}

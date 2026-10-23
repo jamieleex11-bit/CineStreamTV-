@@ -20,7 +20,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -65,6 +64,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -107,7 +107,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
-import androidx.compose.animation.core.Animatable
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -1271,7 +1271,8 @@ private fun Label(
     align: TextAlign? = null,
     tracking: Float = 0f,
     opacity: Float = 1f,
-    lineHeight: Int = 0
+    lineHeight: Int = 0,
+    fontFamily: FontFamily? = null
 ) {
     Text(
         text = text,
@@ -1279,6 +1280,7 @@ private fun Label(
         color = color,
         fontSize = size.sp,
         fontWeight = weight,
+        fontFamily = fontFamily,
         textAlign = align,
         letterSpacing = tracking.sp,
         lineHeight = if (lineHeight > 0) lineHeight.sp else (size * 1.4f).sp,
@@ -1307,6 +1309,7 @@ private fun TvFocusable(
     lift: Boolean = true,
     ringColor: Color = NetWhite,
     bg: (Boolean) -> Color = { NetDarkGray },
+    onFocus: (Boolean) -> Unit = {},
     onClick: () -> Unit,
     content: @Composable BoxScope.(Boolean) -> Unit
 ) {
@@ -1329,7 +1332,10 @@ private fun TvFocusable(
 
     Box(
         modifier = modifier
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                onFocus(it.isFocused)
+            }
             .graphicsLayer {
                 scaleX = animatedScale
                 scaleY = animatedScale
@@ -1455,7 +1461,7 @@ private fun NetflixHomeScreen(
 ) {
     // Rows never reorder while the provider queries settle.
     val providerRows = remember(state.providerShelves) {
-        CATALOG_PROVIDERS.map { it.name }.filter { state.providerShelves[it].isNotEmpty() }
+        CATALOG_PROVIDERS.map { it.name }.filter { state.providerShelves.containsKey(it) }
     }
 
     val heroPool = remember(state.catalog) { state.catalog.take(6) }
@@ -1469,7 +1475,7 @@ private fun NetflixHomeScreen(
 
     LaunchedEffect(heroPool, heroIndex) {
         if (heroPool.size > 1) {
-            delay(HERO_ROTATE_MS)
+            delay(HERO_ROTATE_MS.toLong())
             heroIndex = (heroIndex + 1) % heroPool.size
         }
     }
@@ -2107,7 +2113,7 @@ private fun CatalogGridScreen(
 ) {
     val tabs = remember(providerShelves) {
         listOf("All Studios") + CATALOG_PROVIDERS.map { it.name }
-            .filter { providerShelves[it].isNotEmpty() }
+            .filter { providerShelves.containsKey(it) }
     }
     var selected by remember { mutableStateOf("All Studios") }
     val active = if (selected in tabs) selected else "All Studios"
@@ -2247,7 +2253,7 @@ private fun SearchScreen(
                 columns = GridCells.Fixed(CATALOG_COLUMNS),
                 horizontalArrangement = Arrangement.spacedBy(CARD_GAP),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
-                contentPadding = PaddingValues(vertical = 16.dp, bottom = 48.dp)
+                contentPadding = PaddingValues(top = 16.dp, bottom = 48.dp)
             ) {
                 items(state.results, key = { it.id }) { film ->
                     PosterCard(film = film, onClick = { onOpen(film) })

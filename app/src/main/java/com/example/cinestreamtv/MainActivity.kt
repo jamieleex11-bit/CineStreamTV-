@@ -65,6 +65,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -103,6 +104,7 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -139,7 +141,10 @@ private val NetMuted = Color(0xFFA3A3A3)
 private val JamieGold = Color(0xFFFFD166)
 private val NetGreen = Color(0xFF46D369)
 
-private val Screens = listOf("Home", "Series", "Movies", "My List", "Settings")
+// Search is a normal tab, not a separate pill. It used to sit in its own
+// right-aligned Row, which made it the first thing clipped off-screen on a
+// 720p TV (only ~690dp wide).
+private val Screens = listOf("Home", "Series", "Movies", "My List", "Search", "Settings")
 
 // Layout constants. Every card and every grid reads these, which is what keeps
 // rows and catalog walls perfectly even.
@@ -147,10 +152,15 @@ private val POSTER_WIDTH = 154.dp
 private val POSTER_HEIGHT = 230.dp
 private val CARD_GAP = 16.dp
 private val RANK_SLOT = 56.dp
-private val HERO_HEIGHT = 520.dp
+/** 0-3dp. Netflix TV tiles are effectively square-cornered. */
+private val POSTER_RADIUS = 3.dp
+private val HERO_HEIGHT = 600.dp
 private const val HERO_ROTATE_MS = 9_000
 /** Clears the floating nav bar so nothing hides underneath it. */
+private val NAV_CLEARANCE = 96.dp
 private const val CATALOG_COLUMNS = 6
+/** How much of a narrow nav bar the wordmark may claim before the tabs squeeze. */
+private const val NAV_BRAND_WEIGHT = 0.9f
 
 // ============================ Models ============================
 
@@ -565,6 +575,9 @@ private object TorBoxRepository {
 
     /** Compiled once. It used to be compiled for every file in the library. */
     private val EPISODE_PATTERN: Pattern = Pattern.compile("s(\\d+)e(\\d+)")
+
+    /** Matches the "S01E03" tail on a saved resume title. */
+    val EPISODE_IN_NAME: Pattern = Pattern.compile("(?i)s\\s?\\d+\\s?e\\s?\\d+")
 
     suspend fun loadLibrary(apiKey: String): Result<List<TbFile>> = withContext(Dispatchers.IO) {
         runCatching {
@@ -1149,6 +1162,25 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
     // The home list owns a scroll state so the nav bar can sit over the hero and
     // fade to solid the moment you move.
     val homeListState = rememberLazyListState()
+    // derivedStateOf keeps this to a single Boolean: without it, reading the raw
+    // scroll offset in composition recomposed the whole app on every scrolled pixel,
+    // which is what made browsing feel sticky.
+    val navSolid by remember(selectedScreen) {
+        derivedStateOf {
+            selectedScreen != "Home" ||
+                homeListState.firstVisibleItemIndex > 0 ||
+                homeListState.firstVisibleItemScrollOffset > 40
+        }
+    }
+
+    // The catalog is only reshaped when the shelves actually change, not on every
+    // recomposition. This used to flatten + filter ~300 films inline, twice.
+    val allSeries = remember(home.providerShelves) {
+        home.providerShelves.values.flatten().filter { it.kind == "Series" }.distinctBy { it.id }
+    }
+    val allMovies = remember(home.providerShelves) {
+        home.providerShelves.values.flatten().filter { it.kind == "Movie" }.distinctBy { it.id }
+    }
 
     BackHandler {
         when {
@@ -1185,9 +1217,7 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
                 onClose = viewModel::closeDetails
             )
 
-            else -> Column(Modifier.fillMaxSize()) {
-                NetflixTopNavBar(current = selectedScreen, onSelect = { selectedScreen = it })
-
+            else -> Box(Modifier.fillMaxSize()) {
                 when (selectedScreen) {
                     "Home" -> NetflixHomeScreen(
                         state = home,
@@ -1203,7 +1233,7 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
 
                     "Series" -> CatalogGridScreen(
                         title = "TV Series",
-                        films = home.providerShelves.values.flatten().filter { it.kind == "Series" },
+                        films = allSeries,
                         providerShelves = home.providerShelves,
                         providerLogos = home.providerLogos,
                         emptyMessage = "No series available.",
@@ -1212,7 +1242,7 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
 
                     "Movies" -> CatalogGridScreen(
                         title = "Movies",
-                        films = home.providerShelves.values.flatten().filter { it.kind == "Movie" },
+                        films = allMovies,
                         providerShelves = home.providerShelves,
                         providerLogos = home.providerLogos,
                         emptyMessage = "No movies available.",
@@ -1244,6 +1274,13 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
                     )
                 }
 
+                // Floating above everything, exactly like the TV app.
+                NetflixTopNavBar(
+                    current = selectedScreen,
+                    solid = navSolid,
+                    onSelect = { selectedScreen = it },
+                    modifier = Modifier.align(Alignment.TopCenter)
+                )
             }
         }
     }
@@ -1305,20 +1342,15 @@ private fun TvFocusable(
     content: @Composable BoxScope.(Boolean) -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
+
+    // PERFORMANCE: this used to animate a 20dp drop shadow and set cameraDistance,
+    // on every card in every row. Shadows are one of the most expensive things you
+    // can draw on a TV GPU and they re-render on each focus move. Netflix's TV UI
+    // has no drop shadows either - the focus ring and the scale are the whole cue.
     val animatedScale by animateFloatAsState(
         targetValue = if (focused) scale else 1f,
-        animationSpec = tween(180),
+        animationSpec = tween(150),
         label = "tv-scale"
-    )
-    val elevation by animateDpAsState(
-        targetValue = if (focused && lift) 20.dp else 0.dp,
-        animationSpec = tween(180),
-        label = "tv-elevation"
-    )
-    val ring by animateColorAsState(
-        targetValue = if (focused && border) ringColor else Color.Transparent,
-        animationSpec = tween(120),
-        label = "tv-ring"
     )
 
     Box(
@@ -1330,12 +1362,15 @@ private fun TvFocusable(
             .graphicsLayer {
                 scaleX = animatedScale
                 scaleY = animatedScale
-                cameraDistance = 12f * density
             }
-            // clip before border, or the ring is drawn outside the clip
             .clip(shape)
-            .then(if (focused && border) Modifier.border(3.dp, ring, shape) else Modifier)
-            .shadow(elevation, shape, clip = false, spotColor = NetDeepBlack, ambientColor = NetDeepBlack)
+            .then(
+                if (focused && border) {
+                    Modifier.border(2.dp, ringColor, shape)
+                } else {
+                    Modifier
+                }
+            )
             .background(bg(focused))
             .clickable(enabled = enabled, onClick = onClick)
     ) {
@@ -1361,25 +1396,31 @@ private fun TvPill(
         bg = { focused ->
             when {
                 selected -> NetWhite
-                focused -> Color(0xFF333333)
-                else -> Color(0xFF222222)
+                focused -> Color(0xFF2E2E2E)
+                // Transparent at rest. Filled grey pills made the bar look like a
+                // toolbar of buttons; plain links are what the TV app actually uses.
+                else -> Color.Transparent
             }
         },
         onClick = onClick
     ) { focused ->
         Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
+            Modifier.padding(horizontal = 15.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             if (leading.isNotBlank()) {
-                Label(leading, 12, if (selected || focused) Color.Black else NetMuted, FontWeight.Bold)
+                Label(leading, 12, if (selected) Color.Black else NetWhite, FontWeight.Bold)
             }
             Label(
                 label,
-                13,
-                if (selected || focused) Color.Black else NetMuted,
-                if (selected) FontWeight.Black else FontWeight.Medium,
+                14,
+                when {
+                    selected -> Color.Black
+                    focused -> NetWhite
+                    else -> Color(0xFFB4B4BC)
+                },
+                if (selected) FontWeight.Black else FontWeight.SemiBold,
                 maxLines = 1
             )
         }
@@ -1391,36 +1432,51 @@ private fun TvPill(
 @Composable
 private fun NetflixTopNavBar(
     current: String,
+    solid: Boolean,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val scrim by animateColorAsState(
+        targetValue = if (solid) NetBlack else Color.Transparent,
+        animationSpec = tween(260),
+        label = "nav-scrim"
+    )
+    val hairline by animateColorAsState(
+        targetValue = if (solid) Color(0x1FFFFFFF) else Color.Transparent,
+        animationSpec = tween(260),
+        label = "nav-hairline"
+    )
+
+    // The wordmark and the tab group are laid out with weights rather than fixed
+    // spacers, so a narrow screen shrinks the gap instead of clipping a pill.
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(NetBlack)
-            .padding(horizontal = 40.dp, vertical = 18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
+            .background(scrim)
+            .border(1.dp, hairline)
+            .padding(horizontal = 32.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
         // MollyTV wordmark: "Molly" in white, "TV" in red, tight together.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Label("Molly", 28, NetWhite, FontWeight.Black, tracking = -1f)
-            Label("TV", 28, NetRed, FontWeight.Black, tracking = -1f)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(NAV_BRAND_WEIGHT, fill = false)
+        ) {
+            Label("Molly", 24, NetWhite, FontWeight.Black, tracking = -1f)
+            Label("TV", 24, NetRed, FontWeight.Black, tracking = -1f)
         }
 
-        // ONE rounded container holding every destination, Search included.
+        Spacer(Modifier.width(20.dp))
+
         Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50.dp))
-                .background(Color(0xFF222222))
-                .border(1.dp, Color(0xFF3A3A3A), RoundedCornerShape(50.dp))
-                .padding(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Screens.forEach { screen ->
+                val isSearch = screen == "Search"
                 TvPill(
-                    label = if (screen == "Search") "\uD83D\uDD0D Search" else screen,
+                    label = screen,
+                    leading = if (isSearch) "\uD83D\uDD0D" else "",
                     selected = current == screen,
                     onClick = { onSelect(screen) }
                 )
@@ -1440,6 +1496,19 @@ private fun NetflixHomeScreen(
     onPlayHero: (Film) -> Unit,
     onToggleWatchlist: (Film) -> Unit
 ) {
+    // Title -> how far through you are. Built once, so every row can draw the
+    // red resume bar on a tile you already started without recomputing per card.
+    val resumeProgress = remember(state.resume) {
+        state.resume.mapNotNull { r ->
+            if (r.durationMs <= 0L) return@mapNotNull null
+            normalizeTitle(r.name) to (r.positionMs.toFloat() / r.durationMs).coerceIn(0f, 1f)
+        }.toMap()
+    }
+    val progressFor: (Film) -> Float = { film ->
+        val key = normalizeTitle(film.name)
+        resumeProgress.entries.firstOrNull { it.key.startsWith(key) || key.startsWith(it.key) }?.value ?: 0f
+    }
+
     // Rows never reorder while the provider queries settle.
     val providerRows = remember(state.providerShelves) {
         CATALOG_PROVIDERS.map { it.name }.filter { state.providerShelves.containsKey(it) }
@@ -1448,11 +1517,10 @@ private fun NetflixHomeScreen(
     val heroPool = remember(state.catalog) { state.catalog.take(6) }
     var heroIndex by remember { mutableIntStateOf(0) }
 
-    // Focusing a poster promotes it to the hero and resets the timer.
-    val promoteHero: (Film) -> Unit = { film ->
-        val next = heroPool.indexOfFirst { it.id == film.id }
-        if (next >= 0) heroIndex = next
-    }
+    // PERFORMANCE: browsing used to promote whichever poster you focused into the
+    // hero. That rebuilt the entire home screen (hero art, every row) on every
+    // single focus move, which is what made moving across a row feel laggy.
+    // The hero now rotates on its own timer only.
 
     LaunchedEffect(heroPool, heroIndex) {
         if (heroPool.size > 1) {
@@ -1477,13 +1545,12 @@ private fun NetflixHomeScreen(
                 item(key = "hero_billboard") {
                     HeroBanner(
                         film = hero,
-                        listState = listState,
-                        poolSize = heroPool.size,
-                        activeIndex = heroIndex,
                         onPlay = { onPlayHero(hero) },
                         onOpen = { onOpen(hero) },
                         isInWatchlist = state.watchlist.any { it.id == hero.id },
-                        onToggleWatchlist = { onToggleWatchlist(hero) }
+                        onToggleWatchlist = { onToggleWatchlist(hero) },
+                        ribbon = if (state.catalog.size >= 10) "TOP 10 TODAY" else "",
+                        progress = progressFor(hero)
                     )
                 }
 
@@ -1495,7 +1562,7 @@ private fun NetflixHomeScreen(
                                 contentPadding = PaddingValues(horizontal = 48.dp),
                                 horizontalArrangement = Arrangement.spacedBy(CARD_GAP)
                             ) {
-                                items(state.resume, key = { it.key }) { res ->
+                                items(state.resume, key = { it.key }, contentType = { "resume" }) { res ->
                                     ResumeCard(res) { onResume(res) }
                                 }
                             }
@@ -1509,8 +1576,8 @@ private fun NetflixHomeScreen(
                         subtitle = "What everyone is watching",
                         films = state.catalog.take(10),
                         onOpen = onOpen,
-                        onFocus = promoteHero,
-                        ranked = true
+                        ranked = true,
+                        progressFor = progressFor
                     )
                 }
 
@@ -1520,7 +1587,7 @@ private fun NetflixHomeScreen(
                         subtitle = "Fresh on the charts",
                         films = state.catalog.drop(10).take(18),
                         onOpen = onOpen,
-                        onFocus = promoteHero
+                        progressFor = progressFor
                     )
                 }
 
@@ -1531,7 +1598,7 @@ private fun NetflixHomeScreen(
                         films = state.providerShelves[name].orEmpty().take(20),
                         isLoading = state.isLoadingProviders,
                         onOpen = onOpen,
-                        onFocus = promoteHero
+                        progressFor = progressFor
                     )
                 }
             }
@@ -1549,62 +1616,53 @@ private fun providerLogoUrl(name: String, logos: Map<String, String>): String? {
 @Composable
 private fun HeroBanner(
     film: Film,
-    listState: LazyListState,
-    poolSize: Int,
-    activeIndex: Int,
     onPlay: () -> Unit,
     onOpen: () -> Unit,
     isInWatchlist: Boolean,
-    onToggleWatchlist: () -> Unit
+    onToggleWatchlist: () -> Unit,
+    ribbon: String = "",
+    progress: Float = 0f
 ) {
+    val context = LocalContext.current
     val art = film.backdrop.ifBlank { film.poster }
 
-    // Slow push-in. Subtle, but it stops a still hero looking like a photograph.
-    val kenBurns = rememberInfiniteTransition(label = "ken-burns")
-    val zoom by kenBurns.animateFloat(
-        initialValue = 1.02f,
-        targetValue = 1.10f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(HERO_ROTATE_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "hero-zoom"
-    )
+    // FIXED: decode the backdrop at its native 16:9 size instead of letting Coil
+    // load the full-resolution file and scale it. The "hero background" looked
+    // soft and boxy because a huge bitmap was being sampled down every frame.
+    val request = remember(art) {
+        ImageRequest.Builder(context)
+            .data(art)
+            .size(1280, 720)
+            .crossfade(180)
+            .build()
+    }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(HERO_HEIGHT)
+            .background(NetBlack)
     ) {
         if (art.isNotBlank()) {
             AsyncImage(
-                model = art,
+                model = request,
                 contentDescription = film.name,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        scaleX = zoom
-                        scaleY = zoom
-                        if (listState.firstVisibleItemIndex == 0) {
-                            val scrolled = listState.firstVisibleItemScrollOffset.toFloat()
-                            translationY = scrolled * 0.45f
-                            alpha = 1f - (scrolled / 1100f).coerceIn(0f, 0.55f)
-                        }
-                    },
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop
             )
         }
 
-        // Three scrims: bottom-up fade, left-to-right for legibility, top wash for the nav.
+        // Two scrims, not four. Each full-screen Brush is a full-screen overdraw,
+        // and the hero is the most expensive thing on the home screen.
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(
-                        0f to NetDeepBlack.copy(alpha = 0.6f),
-                        0.32f to Color.Transparent,
-                        0.68f to Color.Transparent,
-                        1f to NetBlack
+                    Brush.horizontalGradient(
+                        0f to NetBlack,
+                        0.42f to NetBlack.copy(alpha = 0.86f),
+                        0.72f to NetBlack.copy(alpha = 0.28f),
+                        1f to Color.Transparent
                     )
                 )
         )
@@ -1612,11 +1670,11 @@ private fun HeroBanner(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.horizontalGradient(
-                        0f to NetBlack,
-                        0.45f to NetBlack.copy(alpha = 0.86f),
-                        0.78f to NetBlack.copy(alpha = 0.2f),
-                        1f to Color.Transparent
+                    Brush.verticalGradient(
+                        0f to NetDeepBlack.copy(alpha = 0.45f),
+                        0.28f to Color.Transparent,
+                        0.62f to Color.Transparent,
+                        1f to NetBlack
                     )
                 )
         )
@@ -1624,7 +1682,7 @@ private fun HeroBanner(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 48.dp, bottom = 48.dp)
+                .padding(start = 48.dp, bottom = 52.dp)
                 .width(680.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -1632,29 +1690,30 @@ private fun HeroBanner(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Label("N", 26, NetRed, FontWeight.Black)
+                Label("M", 24, NetRed, FontWeight.Black)
                 Label(
                     if (film.kind == "Series") "SERIES" else "FILM",
                     11, NetWhite, FontWeight.Black, tracking = 2f
                 )
-                Label("\u2022", 11, NetMuted)
+                if (ribbon.isNotBlank()) {
+                    Box(
+                        Modifier
+                            .background(NetRed, RoundedCornerShape(3.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Label(ribbon, 10, NetWhite, FontWeight.Black, tracking = 1.2f)
+                    }
+                }
                 val match = matchPercent(film.rating)
                 if (match != null) {
                     Label("$match% Match", 13, NetGreen, FontWeight.Bold)
                 }
-                if (film.provider.isNotBlank()) {
-                    Box(
-                        Modifier
-                            .background(Color(0x66000000), RoundedCornerShape(4.dp))
-                            .border(1.dp, Color(0x44FFFFFF), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Label(film.provider, 10, NetWhite, FontWeight.Bold)
-                    }
+                if (film.year.isNotBlank()) {
+                    Label(film.year, 13, NetMuted, FontWeight.Medium)
                 }
             }
 
-            Label(film.name, 52, NetWhite, FontWeight.Black, tracking = -1.6f, maxLines = 2)
+            Label(film.name, 50, NetWhite, FontWeight.Black, tracking = -1.6f, maxLines = 2)
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1663,15 +1722,21 @@ private fun HeroBanner(
                 if (film.rating.isNotBlank()) {
                     Label("\u2605 " + film.rating, 13, NetGreen, FontWeight.Bold)
                 }
-                if (film.year.isNotBlank()) {
-                    Label(film.year, 13, NetMuted, FontWeight.Medium)
+                if (film.provider.isNotBlank()) {
+                    Box(
+                        Modifier
+                            .border(1.dp, Color(0x55FFFFFF), RoundedCornerShape(3.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Label(film.provider, 10, NetWhite, FontWeight.Bold)
+                    }
                 }
                 Label(film.kind, 13, NetMuted)
             }
 
             Label(
                 film.overview.ifBlank { "No synopsis is available for this title yet." },
-                15, NetWhite.copy(alpha = 0.9f),
+                15, NetWhite.copy(alpha = 0.88f),
                 maxLines = 3,
                 lineHeight = 22
             )
@@ -1679,13 +1744,12 @@ private fun HeroBanner(
             Spacer(Modifier.height(6.dp))
 
             Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Pure white Netflix play button.
                 TvFocusable(
-                    modifier = Modifier.width(190.dp).height(52.dp),
-                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.width(180.dp).height(52.dp),
+                    shape = RoundedCornerShape(3.dp),
                     scale = 1.05f,
                     border = false,
                     bg = { focused -> if (focused) Color(0xFFE5E5E5) else NetWhite },
@@ -1702,8 +1766,8 @@ private fun HeroBanner(
                 }
 
                 TvFocusable(
-                    modifier = Modifier.width(200.dp).height(52.dp),
-                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.width(190.dp).height(52.dp),
+                    shape = RoundedCornerShape(3.dp),
                     scale = 1.05f,
                     border = false,
                     bg = { focused -> if (focused) Color(0xFF8A8A8D) else Color(0xAA6D6D6E) },
@@ -1720,8 +1784,8 @@ private fun HeroBanner(
                 }
 
                 TvFocusable(
-                    modifier = Modifier.width(160.dp).height(52.dp),
-                    shape = RoundedCornerShape(6.dp),
+                    modifier = Modifier.width(150.dp).height(52.dp),
+                    shape = RoundedCornerShape(3.dp),
                     scale = 1.05f,
                     bg = { focused ->
                         when {
@@ -1732,6 +1796,7 @@ private fun HeroBanner(
                     },
                     onClick = onToggleWatchlist
                 ) {
+                    /* body unchanged below */
                     Row(
                         Modifier.align(Alignment.Center),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1750,25 +1815,28 @@ private fun HeroBanner(
                     }
                 }
             }
-        }
 
-        // Rotation indicator: also tells you the hero is alive.
-        if (poolSize > 1) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 48.dp, bottom = 64.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                repeat(poolSize) { i ->
+            // If you have already started this one, show how far in - the hero then
+            // reflects your history instead of pretending everything is unwatched.
+            if (progress > 0f) {
+                Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     Box(
                         Modifier
-                            .width(if (i == activeIndex % poolSize) 26.dp else 10.dp)
-                            .height(3.dp)
-                            .background(
-                                if (i == activeIndex % poolSize) NetRed else Color(0x66FFFFFF),
-                                RoundedCornerShape(2.dp)
-                            )
+                            .width(260.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color(0x44FFFFFF))
+                    ) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth(progress)
+                                .fillMaxHeight()
+                                .background(NetRed)
+                        )
+                    }
+                    Label(
+                        (progress * 100).toInt().toString() + "% watched",
+                        11, NetMuted, FontWeight.SemiBold
                     )
                 }
             }
@@ -1776,7 +1844,17 @@ private fun HeroBanner(
     }
 }
 
-// ============================ Rows ============================
+/**
+ * The base every non-hero screen sits on. Flat black reads as dead on a TV, so
+ * this lifts the top few percent and fades to true black - one gradient for the
+ * whole screen, not per card.
+ */
+private val ScreenBackdrop = Brush.verticalGradient(
+    0f to Color(0xFF1D1D24),
+    0.16f to Color(0xFF151519),
+    0.55f to NetBlack,
+    1f to NetBlack
+)
 
 @Composable
 private fun ShelfHeader(title: String, subtitle: String = "") {
@@ -1791,10 +1869,10 @@ private fun ShelfHeader(title: String, subtitle: String = "") {
                 .height(24.dp)
                 .background(NetRed, RoundedCornerShape(2.dp))
         )
-        Column {
-            Label(title, 21, NetWhite, FontWeight.Bold, tracking = -0.4f)
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Label(title, 22, NetWhite, FontWeight.Black, tracking = -0.6f)
             if (subtitle.isNotBlank()) {
-                Label(subtitle, 12, NetMuted, FontWeight.Medium)
+                Label(subtitle, 11, NetMuted, FontWeight.Medium, tracking = 0.2f)
             }
         }
     }
@@ -1805,19 +1883,21 @@ private fun Shelf(
     title: String,
     films: List<Film>,
     onOpen: (Film) -> Unit,
-    onFocus: (Film) -> Unit = {},
     ranked: Boolean = false,
-    subtitle: String = ""
+    subtitle: String = "",
+    progressFor: (Film) -> Float = { 0f }
 ) {
     if (films.isEmpty()) return
-    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+    // Generous vertical room: a focused card scales to 1.07 and used to be clipped
+    // by the row above it, which is what made focus look cramped rather than bold.
+    Column(Modifier.fillMaxWidth().padding(vertical = 18.dp)) {
         ShelfHeader(title, subtitle)
 
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(CARD_GAP)
         ) {
-            itemsIndexed(films, key = { _, f -> f.id }) { index, film ->
+            itemsIndexed(films, key = { _, f -> f.id }, contentType = { _, _ -> "poster" }) { index, film ->
                 Row(verticalAlignment = Alignment.Bottom) {
                     if (ranked) {
                         // Fixed width. It used to change for two-digit numbers, which is
@@ -1828,18 +1908,26 @@ private fun Shelf(
                                 .height(POSTER_HEIGHT),
                             contentAlignment = Alignment.BottomStart
                         ) {
+                            val numeral = (index + 1).toString()
+                            // Two stacked passes: a black one behind for depth, a warm
+                            // grey one in front. Flat grey on flat black read as noise.
                             Label(
-                                (index + 1).toString(),
-                                120,
-                                Color(0xFF3A3A3A),
-                                FontWeight.Black,
+                                numeral, 132, Color(0xFF000000), FontWeight.Black,
+                                Modifier.offset(x = (-2).dp, y = (0).dp),
+                                maxLines = 1, tracking = -9f
+                            )
+                            Label(
+                                numeral, 132, Color(0xFF4A4A52), FontWeight.Black,
                                 Modifier.offset(x = (-6).dp, y = (-4).dp),
-                                maxLines = 1,
-                                tracking = -8f
+                                maxLines = 1, tracking = -9f
                             )
                         }
                     }
-                    PosterCard(film = film, onClick = { onOpen(film) }, onFocus = { if (it) onFocus(film) })
+                    PosterCard(
+                        film = film,
+                        onClick = { onOpen(film) },
+                        progress = progressFor(film)
+                    )
                 }
             }
         }
@@ -1854,23 +1942,27 @@ private fun ProviderShelf(
     films: List<Film>,
     isLoading: Boolean,
     onOpen: (Film) -> Unit,
-    onFocus: (Film) -> Unit
+    progressFor: (Film) -> Float = { 0f }
 ) {
     val provider = PROVIDER_BY_NAME[name] ?: return
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 18.dp)) {
         Row(
-            Modifier.padding(start = 48.dp, bottom = 10.dp),
+            Modifier.padding(start = 48.dp, bottom = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (logo != null) {
+                val logoRequest = remember(logo) {
+                    ImageRequest.Builder(LocalContext.current)
+                        .data(logo)
+                        .size(68, 68)
+                        .build()
+                }
                 AsyncImage(
-                    model = logo,
+                    model = logoRequest,
                     contentDescription = name,
-                    modifier = Modifier
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(6.dp)),
+                    modifier = Modifier.size(34.dp).clip(RoundedCornerShape(3.dp)),
                     contentScale = ContentScale.Fit
                 )
             } else {
@@ -1909,11 +2001,11 @@ private fun ProviderShelf(
                 contentPadding = PaddingValues(horizontal = 48.dp),
                 horizontalArrangement = Arrangement.spacedBy(CARD_GAP)
             ) {
-                items(films, key = { it.id }) { film ->
+                items(films, key = { it.id }, contentType = { "poster" }) { film ->
                     PosterCard(
                         film = film,
                         onClick = { onOpen(film) },
-                        onFocus = { if (it) onFocus(film) }
+                        progress = progressFor(film)
                     )
                 }
             }
@@ -1923,36 +2015,155 @@ private fun ProviderShelf(
 
 // ============================ Cards ============================
 
+/**
+ * Netflix TV title card.
+ *
+ * Deliberately NOT a phone card: no rounded corners, no drop shadow, no glassy
+ * overlays, no chips stacked on the artwork. Just the poster, full bleed, and a
+ * white focus ring. The title band appears only while focused, on a solid black
+ * bar - a solid fill is far cheaper to draw than the gradient this used to use,
+ * and it stops the poster looking like a Material app.
+ */
 @Composable
 private fun PosterCard(
     film: Film,
     onClick: () -> Unit,
+    progress: Float = 0f,
     onFocus: (Boolean) -> Unit = {}
 ) {
+    val context = LocalContext.current
     val art = film.poster.ifBlank { film.backdrop }
-    val provider = if (film.provider.isNotBlank()) PROVIDER_BY_NAME[film.provider] else null
-    val titleAlpha by animateFloatAsState(if (film.provider.isNotBlank()) 1f else 0f, label = "noop")
+
+    // Decode at roughly the size we paint. Without this Coil loaded the full
+    // poster file and downscaled it on every frame it was visible.
+    val request = remember(art) {
+        ImageRequest.Builder(context)
+            .data(art)
+            .size(316, 472)
+            .crossfade(120)
+            .build()
+    }
 
     TvFocusable(
         modifier = Modifier
             .width(POSTER_WIDTH)
             .height(POSTER_HEIGHT),
-        shape = RoundedCornerShape(8.dp),
-        scale = 1.06f,
+        shape = RoundedCornerShape(POSTER_RADIUS),
+        scale = 1.07f,
+        border = true,
+        lift = false,
+        ringColor = NetWhite,
+        bg = { NetCardBg },
         onFocus = onFocus,
         onClick = onClick
     ) { focused ->
-        Box(Modifier.fillMaxSize().background(NetCardBg)) {
-            if (art.isNotBlank()) {
-                AsyncImage(
-                    model = art,
-                    contentDescription = film.name,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop
-                )
+        if (art.isNotBlank()) {
+            AsyncImage(
+                model = request,
+                contentDescription = film.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
+
+        // A hairline at rest. Without it, any dark poster dissolved into the black
+        // background and the row read as holes instead of tiles.
+        if (!focused) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(POSTER_RADIUS))
+            )
+        }
+
+        // Only while focused: a solid band carrying the title and real metadata.
+        if (focused) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .background(Color(0xF5000000))
+                    .padding(horizontal = 8.dp, vertical = 7.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Label(film.name, 12, NetWhite, FontWeight.Bold, maxLines = 1)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    if (film.rating.isNotBlank()) {
+                        Label("\u2605 " + film.rating, 9, NetGreen, FontWeight.Bold)
+                    }
+                    if (film.year.isNotBlank()) {
+                        Label(film.year, 9, NetMuted, FontWeight.SemiBold)
+                    }
+                    val provider = if (film.provider.isNotBlank()) PROVIDER_BY_NAME[film.provider] else null
+                    if (provider != null) {
+                        Box(
+                            Modifier
+                                .background(provider.color, RoundedCornerShape(2.dp))
+                                .border(1.dp, provider.ring, RoundedCornerShape(2.dp))
+                                .padding(horizontal = 4.dp, vertical = 1.dp)
+                        ) {
+                            Label(provider.mark, 7, NetWhite, FontWeight.Black, maxLines = 1)
+                        }
+                    }
+                }
             }
         }
 
+        // Red resume bar along the bottom edge, the way Netflix marks a tile you started.
+        if (progress > 0f) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(Color(0x55000000))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .background(NetRed)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
+    val progress = if (resume.durationMs > 0L) {
+        (resume.positionMs.toFloat() / resume.durationMs).coerceIn(0f, 1f)
+    } else 0f
+
+    val context = LocalContext.current
+    val request = remember(resume.image) {
+        ImageRequest.Builder(context)
+            .data(resume.image)
+            .size(600, 340)
+            .crossfade(120)
+            .build()
+    }
+
+    TvFocusable(
+        modifier = Modifier
+            .width(300.dp)
+            .height(170.dp),
+        shape = RoundedCornerShape(POSTER_RADIUS),
+        scale = 1.05f,
+        lift = false,
+        onClick = onClick
+    ) {
+        if (resume.image.isNotBlank()) {
+            AsyncImage(
+                model = request,
+                contentDescription = resume.name,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
         Box(
             Modifier
                 .fillMaxSize()
@@ -1964,87 +2175,6 @@ private fun PosterCard(
                 )
         )
 
-        // Real service badge, top-left. Nothing is shown when we do not know.
-        if (provider != null) {
-            Box(
-                Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp)
-                    .background(provider.color, RoundedCornerShape(4.dp))
-                    .border(1.dp, provider.ring, RoundedCornerShape(4.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
-            ) {
-                Label(provider.mark, 9, NetWhite, FontWeight.Black, maxLines = 1)
-            }
-        }
-
-        if (film.rating.isNotBlank()) {
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .background(Color(0xCC000000), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 5.dp, vertical = 2.dp)
-            ) {
-                Label("\u2605 " + film.rating, 10, NetGreen, FontWeight.Bold)
-            }
-        }
-
-        // Title reveals on focus, like the TV app.
-        Column(
-            Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            Label(
-                film.name, 11, NetWhite, FontWeight.Bold,
-                maxLines = 1, opacity = if (focused) 1f else titleAlpha.coerceAtLeast(0.85f)
-            )
-            Label(
-                film.year,
-                9, NetMuted, FontWeight.SemiBold,
-                maxLines = 1, opacity = if (focused) 1f else 0f, tracking = 0.3f
-            )
-        }
-    }
-}
-
-@Composable
-private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
-    val progress = if (resume.durationMs > 0L) {
-        (resume.positionMs.toFloat() / resume.durationMs).coerceIn(0f, 1f)
-    } else 0f
-
-    TvFocusable(
-        modifier = Modifier
-            .width(300.dp)
-            .height(170.dp),
-        shape = RoundedCornerShape(8.dp),
-        scale = 1.05f,
-        onClick = onClick
-    ) {
-        if (resume.image.isNotBlank()) {
-            AsyncImage(
-                model = resume.image,
-                contentDescription = resume.name,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.45f to Color(0x14000000),
-                        1f to Color(0xDD000000)
-                    )
-                )
-        )
-
         Column(
             Modifier
                 .align(Alignment.BottomStart)
@@ -2052,7 +2182,19 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            Label(resume.name, 14, NetWhite, FontWeight.Bold, maxLines = 1)
+            val code = TorBoxRepository.EPISODE_IN_NAME.matcher(resume.name).let { m ->
+                if (m.find()) m.group(0)?.uppercase()?.replace(" ", "") else ""
+            }
+            if (code.isNotBlank()) {
+                Label(
+                    code, 10, NetRed, FontWeight.Black,
+                    fontFamily = FontFamily.Monospace, tracking = 0.6f, maxLines = 1
+                )
+            }
+            Label(
+                resume.name.replace(Regex("(?i)\s*s\d+\s*e\d+.*$"), "").trim(),
+                14, NetWhite, FontWeight.Bold, maxLines = 1
+            )
             Label(remainingLabel(resume.positionMs, resume.durationMs), 11, NetMuted)
             Box(
                 Modifier
@@ -2110,8 +2252,8 @@ private fun CatalogGridScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(NetBlack)
-            .padding(start = 48.dp, end = 48.dp, top = 8.dp)
+            .background(ScreenBackdrop)
+            .padding(start = 48.dp, end = 48.dp, top = NAV_CLEARANCE)
     ) {
         Row(
             Modifier
@@ -2170,7 +2312,7 @@ private fun CatalogGridScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                     contentPadding = PaddingValues(bottom = 48.dp)
                 ) {
-                    items(visible, key = { it.id }) { film ->
+                    items(visible, key = { it.id }, contentType = { "poster" }) { film ->
                         PosterCard(film = film, onClick = { onOpen(film) })
                     }
                 }
@@ -2190,10 +2332,10 @@ private fun SearchScreen(
     Column(
         Modifier
             .fillMaxSize()
-            .background(NetBlack)
-            .padding(start = 48.dp, end = 48.dp, top = 8.dp)
+            .background(ScreenBackdrop)
+            .padding(start = 48.dp, end = 48.dp, top = NAV_CLEARANCE)
     ) {
-        Label("Search", 28, NetWhite, FontWeight.Black, tracking = -1f, modifier = Modifier.padding(bottom = 16.dp))
+        Label("Search", 30, NetWhite, FontWeight.Black, tracking = -1.2f, modifier = Modifier.padding(bottom = 16.dp))
 
         OutlinedTextField(
             value = state.query,
@@ -2236,7 +2378,7 @@ private fun SearchScreen(
                 verticalArrangement = Arrangement.spacedBy(20.dp),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 48.dp)
             ) {
-                items(state.results, key = { it.id }) { film ->
+                items(state.results, key = { it.id }, contentType = { "poster" }) { film ->
                     PosterCard(film = film, onClick = { onOpen(film) })
                 }
             }
@@ -2302,17 +2444,22 @@ private fun DetailsScreen(
     } else 0f
 
     Box(Modifier.fillMaxSize().background(NetBlack)) {
-        Crossfade(targetState = film.backdrop.ifBlank { film.poster }, label = "detail-art") { art ->
-            Box(Modifier.fillMaxSize().background(NetCardBg)) {
-                if (art.isNotBlank()) {
-                    AsyncImage(
-                        model = art,
-                        contentDescription = null,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            }
+        val detailContext = LocalContext.current
+        val detailArt = film.backdrop.ifBlank { film.poster }
+        val detailRequest = remember(detailArt) {
+            ImageRequest.Builder(detailContext)
+                .data(detailArt)
+                .size(1280, 720)
+                .crossfade(180)
+                .build()
+        }
+        if (detailArt.isNotBlank()) {
+            AsyncImage(
+                model = detailRequest,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
         }
 
         Box(
@@ -2634,6 +2781,7 @@ private fun DetailsScreen(
 /** One Netflix-style episode row: still, ordinal, title, runtime, synopsis. */
 @Composable
 private fun EpisodeRow(episode: Episode, index: Int, onClick: () -> Unit) {
+    val context = LocalContext.current
     TvFocusable(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(6.dp),
@@ -2655,8 +2803,15 @@ private fun EpisodeRow(episode: Episode, index: Int, onClick: () -> Unit) {
                     .background(Color(0xFF222222))
             ) {
                 if (episode.still.isNotBlank()) {
+                    val stillRequest = remember(episode.still) {
+                        ImageRequest.Builder(context)
+                            .data(episode.still)
+                            .size(300, 180)
+                            .crossfade(100)
+                            .build()
+                    }
                     AsyncImage(
-                        model = episode.still,
+                        model = stillRequest,
                         contentDescription = episode.name,
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
@@ -3204,12 +3359,12 @@ private fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(NetBlack)
+            .background(ScreenBackdrop)
             .verticalScroll(rememberScrollState())
-            .padding(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
+            .padding(start = 48.dp, end = 48.dp, top = NAV_CLEARANCE, bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Label("Settings", 28, NetWhite, FontWeight.Black, tracking = -1f)
+        Label("Settings", 30, NetWhite, FontWeight.Black, tracking = -1.2f)
 
         // ---- Profile card ----
         Surface(
@@ -3419,7 +3574,10 @@ private fun SettingsScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Label("\u2764  Made by Jamie", 16, JamieGold, FontWeight.Black)
+            Label(
+                "\u2764  Made by Jamie", 17, JamieGold, FontWeight.Black,
+                fontFamily = FontFamily.Serif, tracking = 0.4f
+            )
             Label("MollyTV \u2022 Google TV & Android TV Edition", 11, NetMuted)
         }
     }

@@ -147,10 +147,9 @@ private val POSTER_WIDTH = 154.dp
 private val POSTER_HEIGHT = 230.dp
 private val CARD_GAP = 16.dp
 private val RANK_SLOT = 56.dp
-private val HERO_HEIGHT = 600.dp
+private val HERO_HEIGHT = 520.dp
 private const val HERO_ROTATE_MS = 9_000
 /** Clears the floating nav bar so nothing hides underneath it. */
-private val NAV_CLEARANCE = 96.dp
 private const val CATALOG_COLUMNS = 6
 
 // ============================ Models ============================
@@ -1150,9 +1149,6 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
     // The home list owns a scroll state so the nav bar can sit over the hero and
     // fade to solid the moment you move.
     val homeListState = rememberLazyListState()
-    val navSolid = selectedScreen != "Home" ||
-        homeListState.firstVisibleItemIndex > 0 ||
-        homeListState.firstVisibleItemScrollOffset > 40
 
     BackHandler {
         when {
@@ -1189,7 +1185,9 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
                 onClose = viewModel::closeDetails
             )
 
-            else -> Box(Modifier.fillMaxSize()) {
+            else -> Column(Modifier.fillMaxSize()) {
+                NetflixTopNavBar(current = selectedScreen, onSelect = { selectedScreen = it })
+
                 when (selectedScreen) {
                     "Home" -> NetflixHomeScreen(
                         state = home,
@@ -1246,13 +1244,6 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
                     )
                 }
 
-                // Floating above everything, exactly like the TV app.
-                NetflixTopNavBar(
-                    current = selectedScreen,
-                    solid = navSolid,
-                    onSelect = { selectedScreen = it },
-                    modifier = Modifier.align(Alignment.TopCenter)
-                )
             }
         }
     }
@@ -1377,7 +1368,7 @@ private fun TvPill(
         onClick = onClick
     ) { focused ->
         Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -1400,28 +1391,16 @@ private fun TvPill(
 @Composable
 private fun NetflixTopNavBar(
     current: String,
-    solid: Boolean,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val scrim by animateColorAsState(
-        targetValue = if (solid) NetBlack else Color.Transparent,
-        animationSpec = tween(260),
-        label = "nav-scrim"
-    )
-    val hairline by animateColorAsState(
-        targetValue = if (solid) Color(0x1FFFFFFF) else Color.Transparent,
-        animationSpec = tween(260),
-        label = "nav-hairline"
-    )
-
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(scrim)
-            .border(1.dp, hairline)
-            .padding(horizontal = 48.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .background(NetBlack)
+            .padding(horizontal = 40.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
         // MollyTV wordmark: "Molly" in white, "TV" in red, tight together.
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1429,26 +1408,24 @@ private fun NetflixTopNavBar(
             Label("TV", 28, NetRed, FontWeight.Black, tracking = -1f)
         }
 
-        Spacer(Modifier.width(28.dp))
-
+        // ONE rounded container holding every destination, Search included.
         Row(
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .clip(RoundedCornerShape(50.dp))
+                .background(Color(0xFF222222))
+                .border(1.dp, Color(0xFF3A3A3A), RoundedCornerShape(50.dp))
+                .padding(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Screens.forEach { screen ->
-                TvPill(label = screen, selected = current == screen, onClick = { onSelect(screen) })
+                TvPill(
+                    label = if (screen == "Search") "\uD83D\uDD0D Search" else screen,
+                    selected = current == screen,
+                    onClick = { onSelect(screen) }
+                )
             }
         }
-
-        Spacer(Modifier.weight(1f))
-
-        // Dedicated search pill on the right, so the tabs never crowd.
-        TvPill(
-            label = "Search",
-            leading = "\uD83D\uDD0D",
-            selected = current == "Search",
-            onClick = { onSelect("Search") }
-        )
     }
 }
 
@@ -2134,7 +2111,7 @@ private fun CatalogGridScreen(
         Modifier
             .fillMaxSize()
             .background(NetBlack)
-            .padding(start = 48.dp, end = 48.dp, top = NAV_CLEARANCE)
+            .padding(start = 48.dp, end = 48.dp, top = 8.dp)
     ) {
         Row(
             Modifier
@@ -2214,7 +2191,7 @@ private fun SearchScreen(
         Modifier
             .fillMaxSize()
             .background(NetBlack)
-            .padding(start = 48.dp, end = 48.dp, top = NAV_CLEARANCE)
+            .padding(start = 48.dp, end = 48.dp, top = 8.dp)
     ) {
         Label("Search", 28, NetWhite, FontWeight.Black, tracking = -1f, modifier = Modifier.padding(bottom = 16.dp))
 
@@ -3229,7 +3206,7 @@ private fun SettingsScreen(
             .fillMaxSize()
             .background(NetBlack)
             .verticalScroll(rememberScrollState())
-            .padding(start = 48.dp, end = 48.dp, top = NAV_CLEARANCE, bottom = 48.dp),
+            .padding(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         Label("Settings", 28, NetWhite, FontWeight.Black, tracking = -1f)

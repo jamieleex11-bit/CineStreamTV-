@@ -1753,8 +1753,12 @@ private fun PlayerScreen(
         return
     }
 
-    val exoPlayer = remember(streamUrl) {
-        // FIX: a MIME type is required for HLS / DASH to pick the right renderers.
+    // The explicit ExoPlayer type is deliberate. When the player is built by a fluent
+    // chain and one link in that chain does not exist, the whole chain becomes an error
+    // type and every later exoPlayer.<something> fails too - one mistake used to
+    // produce twenty errors. With the type pinned, damage is contained to one line.
+    val exoPlayer: ExoPlayer = remember(streamUrl) {
+        // FIX: a MIME type is required for HLS / DASH so ExoPlayer picks the right renderer.
         val mimeType = when {
             streamUrl.contains(".m3u8") -> MimeTypes.APPLICATION_M3U8
             streamUrl.contains(".mpd") -> MimeTypes.APPLICATION_MPD
@@ -1762,13 +1766,13 @@ private fun PlayerScreen(
             else -> null
         }
 
-        val builder = MediaItem.Builder().setUri(streamUrl)
-        if (mimeType != null) builder.setMimeType(mimeType)
+        val mediaItem = MediaItem.Builder().setUri(streamUrl)
+        if (mimeType != null) mediaItem.setMimeType(mimeType)
 
-        // FIX: these three options live on ExoPlayer.Builder. setHandleAudioBecomingNoisy
-        // and setKeepContentOnPlayerReset are setter-only there, so they cannot be written
-        // as Kotlin property assignments and must not be called on the built player.
-        ExoPlayer.Builder(context)
+        // Audio focus + pause-on-unplug. Both of these ARE on ExoPlayer.Builder and both
+        // return the Builder. setKeepContentOnPlayerReset is NOT - that one belongs to
+        // PlayerView, so it is set down in the AndroidView factory instead.
+        val player: ExoPlayer = ExoPlayer.Builder(context)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -1777,13 +1781,12 @@ private fun PlayerScreen(
                 /* handleAudioFocus = */ true
             )
             .setHandleAudioBecomingNoisy(true)
-            .setKeepContentOnPlayerReset(true)
             .build()
-            .apply {
-                setMediaItem(builder.build(), request.startPositionMs)
-                prepare()
-                playWhenReady = true
-            }
+
+        player.setMediaItem(mediaItem.build(), request.startPositionMs)
+        player.prepare()
+        player.playWhenReady = true
+        player
     }
 
     DisposableEffect(exoPlayer) {
@@ -1833,6 +1836,9 @@ private fun PlayerScreen(
                     useController = true
                     isFocusable = true
                     keepScreenOn = true
+                    // PlayerView owns this: it keeps the last decoded frame on screen while
+                    // the player is reset instead of flashing a black shutter.
+                    setKeepContentOnPlayerReset(true)
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT

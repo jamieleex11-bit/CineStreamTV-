@@ -10,6 +10,17 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.alpha
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -27,7 +38,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -112,6 +125,9 @@ private val NetGreen = Color(0xFF46D369)
 
 private val Screens = listOf("Search", "Home", "Shows", "Movies", "My List", "Settings")
 
+/** Season pills shown on a series. TMDB is queried for whichever one is selected. */
+private val DEFAULT_SEASONS = (1..8).toList()
+
 // ============================= Models =============================
 
 data class Film(
@@ -187,7 +203,11 @@ data class DetailUiState(
     val resumePositionMs: Long = 0L,
     val resumeDurationMs: Long = 0L,
     val season: Int = 1,
-    val episodes: List<Episode> = emptyList()
+    val seasons: List<Int> = emptyList(),
+    val episodes: List<Episode> = emptyList(),
+    val episodesLoading: Boolean = false,
+    val episodesError: String = "",
+    val showEpisodes: Boolean = false
 )
 
 data class Episode(
@@ -195,7 +215,8 @@ data class Episode(
     val name: String,
     val still: String,
     val overview: String,
-    val runtime: String
+    val runtime: String,
+    val airDate: String = ""
 )
 
 // ============================= Helpers =============================
@@ -635,7 +656,8 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
         _detail.value = DetailUiState(
             film = film,
             resumePositionMs = resumeItem?.positionMs ?: 0L,
-            resumeDurationMs = resumeItem?.durationMs ?: 0L
+            resumeDurationMs = resumeItem?.durationMs ?: 0L,
+            seasons = if (film.kind == "Series") DEFAULT_SEASONS else emptyList()
         )
 
         if (film.kind == "Series") loadEpisodes(film, season = 1)
@@ -648,19 +670,57 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
     }
 
     private fun loadEpisodes(film: Film, season: Int) {
-        val apiKey = _settings.value.tmdbKey
-        if (apiKey.isBlank()) return
+        val apiKey = _settings.value.tmdbKey.trim()
+        if (apiKey.isBlank()) {
+            _detail.update {
+                it.copy(
+                    episodes = emptyList(),
+                    episodesLoading = false,
+                    episodesError = "Add a TMDB API key in Settings to load episode lists."
+                )
+            }
+            return
+        }
 
         episodesJob?.cancel()
+        _detail.update { it.copy(episodesLoading = true, episodesError = "") }
         episodesJob = viewModelScope.launch {
             TmdbRepository.loadEpisodes(apiKey, film, season)
                 .onSuccess { episodes ->
                     _detail.update {
                         // an if-without-else here returns Unit and breaks the (T) -> T contract
-                        if (it.season == season) it.copy(episodes = episodes) else it
+                        if (it.season == season) {
+                            it.copy(episodes = episodes, episodesLoading = false)
+                        } else {
+                            it
+                        }
                     }
                 }
-                .onFailure { _detail.update { it.copy(episodes = emptyList()) } }
+                .onFailure { error ->
+                    _detail.update {
+                        if (it.season == season) {
+                            it.copy(
+                                episodes = emptyList(),
+                                episodesLoading = false,
+                                episodesError = readableError(error, "Could not load this season.")
+                            )
+                        } else {
+                            it
+                        }
+                    }
+                }
+        }
+    }
+
+    /** The Episodes button. Netflix keeps the list hidden until you ask for it. */
+    fun toggleEpisodes() {
+        val film = _detail.value.film ?: return
+        val showing = !_detail.value.showEpisodes
+        _detail.update { it.copy(showEpisodes = showing) }
+
+        // First open kicks off the fetch; re-opening reuses what we already have.
+        if (showing && _detail.value.episodes.isEmpty() && !_detail.value.episodesLoading) {
+            loadEpisodes(film, _detail.value.season)
         }
     }
 
@@ -718,6 +778,34 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
                 }
             )
         }
+    }
+
+    /** Hero "Play" - starts straight away, resuming if we have a saved position. */
+    fun quickPlay(film: Film) {
+        val needle = normalizeTitle(film.name)
+        val saved = _home.value.resume.firstOrNull { normalizeTitle(it.name) == needle }
+            ?: _home.value.resume.firstOrNull { name.isNotBlank() && tokenOverlap(it.name, film.name) >= 0.7 }
+
+        _playRequest.value = PlayRequest(
+            name = film.name,
+            image = film.backdrop.ifBlank { film.poster },
+            url = "",
+            torrentId = -1,
+            fileId = -1,
+            startPositionMs = saved?.positionMs ?: 0L
+        )
+    }
+
+    /** Episode rows play under their own resume key so S01E01 never resumes into S01E02. */
+    fun playEpisode(film: Film, episode: Episode) {
+        _playRequest.value = PlayRequest(
+            name = film.name + " " + episode.code,
+            image = episode.still.ifBlank { film.backdrop.ifBlank { film.poster } },
+            url = "",
+            torrentId = -1,
+            fileId = -1,
+            startPositionMs = 0L
+        )
     }
 
     fun playFilm(startPositionMs: Long) {
@@ -998,6 +1086,8 @@ private fun CineStreamApp(viewModel: AppViewModel) {
                 onFindFiles = viewModel::findTorBoxMatches,
                 onPickFile = viewModel::playTorBoxFile,
                 onSelectSeason = viewModel::setSeason,
+                onToggleEpisodes = viewModel::toggleEpisodes,
+                onPlayEpisode = viewModel::playEpisode,
                 onToggleWatchlist = { viewModel.toggleWatchlist(activeFilm) },
                 onClose = viewModel::closeDetails
             )
@@ -1006,7 +1096,12 @@ private fun CineStreamApp(viewModel: AppViewModel) {
                 TopNavigationBar(selectedScreen) { selectedScreen = it }
 
                 when (selectedScreen) {
-                    "Home" -> HomeScreen(home, viewModel::openDetails, viewModel::resumeFromHome)
+                    "Home" -> HomeScreen(
+                        state = home,
+                        onPlay = viewModel::quickPlay,
+                        onOpen = viewModel::openDetails,
+                        onResume = viewModel::resumeFromHome
+                    )
 
                     "Shows" -> FilteredCatalogScreen(
                         "TV Shows",
@@ -1066,36 +1161,66 @@ private fun Label(
     weight: FontWeight = FontWeight.Normal,
     modifier: Modifier = Modifier,
     maxLines: Int = Int.MAX_VALUE,
-    align: TextAlign? = null
+    align: TextAlign? = null,
+    tracking: Float = 0f,
+    opacity: Float = 1f
 ) {
     Text(
         text = text,
-        modifier = modifier,
+        // NOTE: this must be `opacity`, not `alpha`. Inside graphicsLayer the receiver's
+        // own `alpha` property wins the name lookup, so writing `this.alpha = alpha`
+        // would be a self-assignment and the fade would silently never happen.
+        modifier = modifier.graphicsLayer { this.alpha = opacity },
         color = color,
         fontSize = size.sp,
         fontWeight = weight,
         textAlign = align,
-        lineHeight = (size * 1.35f).sp,
+        lineHeight = (size * 1.4f).sp,
+        letterSpacing = tracking.sp,
         maxLines = maxLines,
         overflow = TextOverflow.Ellipsis
     )
 }
 
-/** One focus/click wrapper for every card, pill and button (remote friendly). */
+/** Small all-caps kicker, the way Netflix labels a row or a badge. */
+@Composable
+private fun Kicker(text: String, color: Color = NetMuted, modifier: Modifier = Modifier) {
+    Label(text, 10, color, FontWeight.Bold, modifier, tracking = 1.6f)
+}
+
+/**
+ * The one focus/click wrapper every card, pill and button goes through.
+ * Netflix-style: scale up, lift with a real drop shadow, and draw a white ring.
+ */
 @Composable
 private fun Focusable(
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(10.dp),
-    scale: Float = 1.07f,
+    shape: Shape = RoundedCornerShape(8.dp),
+    scale: Float = 1.06f,
     border: Boolean = true,
     enabled: Boolean = true,
+    lift: Boolean = true,
     bg: (Boolean) -> Color = { NetDarkGray },
     onFocus: (Boolean) -> Unit = {},
     onClick: () -> Unit,
     content: @Composable BoxScope.(Boolean) -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val animatedScale by animateFloatAsState(if (focused) scale else 1f, label = "focus-scale")
+    val animatedScale by animateFloatAsState(
+        targetValue = if (focused) scale else 1f,
+        animationSpec = tween(180, easing = LinearEasing),
+        label = "focus-scale"
+    )
+    val elevation by animateDpAsState(
+        targetValue = if (focused && lift) 22.dp else 0.dp,
+        animationSpec = tween(180),
+        label = "focus-elevation"
+    )
+    val ring by animateColorAsState(
+        targetValue = if (focused && border) NetWhite else Color.Transparent,
+        animationSpec = tween(120),
+        label = "focus-ring"
+    )
 
     Box(
         modifier = modifier
@@ -1103,10 +1228,15 @@ private fun Focusable(
                 focused = it.isFocused
                 onFocus(it.isFocused)
             }
-            .scale(animatedScale)
-            // FIX: clip before border, otherwise the ring is drawn outside the clip.
+            .graphicsLayer {
+                scaleX = animatedScale
+                scaleY = animatedScale
+                cameraDistance = 12f * density
+            }
+            // clip before border, otherwise the ring is drawn outside the clip
             .clip(shape)
-            .then(if (focused && border) Modifier.border(3.dp, NetWhite, shape) else Modifier)
+            .then(if (focused && border) Modifier.border(3.dp, ring, shape) else Modifier)
+            .shadow(elevation, shape, clip = false, spotColor = NetBlack, ambientColor = NetBlack)
             .background(bg(focused))
             .clickable(enabled = enabled, onClick = onClick)
     ) {
@@ -1116,38 +1246,55 @@ private fun Focusable(
 
 @Composable
 private fun TopNavigationBar(current: String, onSelect: (String) -> Unit) {
-    Box(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 14.dp),
-        contentAlignment = Alignment.Center
+            .background(NetBlack)
+            .padding(horizontal = 48.dp, vertical = 18.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Label("CINE", 22, NetWhite, FontWeight.Black, tracking = -0.8f)
+            Label("STREAM", 22, NetRed, FontWeight.Black, tracking = -0.8f)
+        }
+
+        Spacer(Modifier.width(40.dp))
+
         Row(
-            modifier = Modifier
-                .clip(RoundedCornerShape(50.dp))
-                .background(Color(0xFF1C1C24))
-                .border(1.dp, Color(0xFF2E2E38), RoundedCornerShape(50.dp))
-                .padding(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(26.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Screens.forEach { screen ->
                 val selected = current == screen
 
                 Focusable(
-                    shape = RoundedCornerShape(50.dp),
+                    shape = RoundedCornerShape(4.dp),
                     scale = 1.05f,
                     border = false,
-                    bg = { focused -> if (selected || focused) NetWhite else Color.Transparent },
+                    lift = false,
+                    bg = { Color.Transparent },
                     onClick = { onSelect(screen) }
                 ) { focused ->
-                    Label(
-                        text = if (screen == "Search") "Search" else screen,
-                        size = 14,
-                        color = if (selected || focused) Color.Black else NetWhite,
-                        weight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 8.dp)
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Label(
+                            text = if (screen == "Search") "Search" else screen,
+                            size = 15,
+                            color = when {
+                                selected -> NetWhite
+                                focused -> Color(0xFFE6E6EA)
+                                else -> NetMuted
+                            },
+                            weight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp)
+                        )
+                        // the underline Netflix uses to mark the active tab
+                        Box(
+                            Modifier
+                                .width(if (selected) 26.dp else 0.dp)
+                                .height(3.dp)
+                                .background(NetRed, RoundedCornerShape(2.dp))
+                        )
+                    }
                 }
             }
         }
@@ -1158,12 +1305,14 @@ private fun TopNavigationBar(current: String, onSelect: (String) -> Unit) {
 private fun PosterCard(film: Film, onFocus: (Boolean) -> Unit = {}, onClick: () -> Unit) {
     Focusable(
         modifier = Modifier
-            .width(150.dp)
-            .height(225.dp),
+            .width(154.dp)
+            .height(232.dp),
+        shape = RoundedCornerShape(8.dp),
+        scale = 1.07f,
         onFocus = onFocus,
         onClick = onClick
-    ) {
-        // FIX: fall back to the backdrop, some trending items have no poster.
+    ) { focused ->
+        // fall back to the backdrop, some trending items have no poster
         Crossfade(targetState = film.poster.ifBlank { film.backdrop }, label = "poster") { art ->
             if (art.isNotBlank()) {
                 AsyncImage(
@@ -1175,16 +1324,45 @@ private fun PosterCard(film: Film, onFocus: (Boolean) -> Unit = {}, onClick: () 
             }
         }
 
+        // bottom scrim so the revealed title always reads over the artwork
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.5f to Color.Transparent,
+                        1f to Color(0xF2141414)
+                    )
+                )
+        )
+
         if (film.rating.isNotBlank()) {
             Box(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-                    .background(Color(0xB3000000), RoundedCornerShape(5.dp))
-                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(7.dp)
+                    .background(Color(0xB3000000), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 5.dp, vertical = 2.dp)
             ) {
-                Label("\u2605 " + film.rating, 11, NetGreen, FontWeight.Bold)
+                Label("\u2605 " + film.rating, 10, NetGreen, FontWeight.Bold)
             }
+        }
+
+        // the title only appears on focus, exactly like the TV app
+        val titleAlpha by animateFloatAsState(if (focused) 1f else 0f, label = "poster-title")
+        Column(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Label(film.name, 14, NetWhite, FontWeight.Bold, maxLines = 1, opacity = titleAlpha)
+            Label(
+                listOf(film.year, film.kind).filter { it.isNotBlank() }.joinToString("  \u00B7  "),
+                10, NetMuted, FontWeight.SemiBold,
+                maxLines = 1, opacity = titleAlpha, tracking = 0.3f
+            )
         }
     }
 }
@@ -1195,7 +1373,14 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
         (resume.positionMs.toFloat() / resume.durationMs).coerceIn(0f, 1f)
     } else 0f
 
-    Focusable(modifier = Modifier.width(300.dp).height(180.dp), onClick = onClick) {
+    Focusable(
+        modifier = Modifier
+            .width(330.dp)
+            .height(186.dp),
+        shape = RoundedCornerShape(8.dp),
+        scale = 1.06f,
+        onClick = onClick
+    ) {
         if (resume.image.isNotBlank()) {
             AsyncImage(
                 model = resume.image,
@@ -1209,7 +1394,11 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.verticalGradient(listOf(Color.Transparent, Color(0x55000000), Color(0xEE000000)))
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.45f to Color(0x14000000),
+                        1f to Color(0xF2000000)
+                    )
                 )
         )
 
@@ -1217,21 +1406,35 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            Label(resume.name, 14, NetWhite, FontWeight.Bold, maxLines = 1)
-            Label(remainingLabel(resume.positionMs, resume.durationMs), 11, Color(0xFFDDDDDD), maxLines = 1)
+            Label(resume.name, 16, NetWhite, FontWeight.Bold, maxLines = 1)
+            Label(remainingLabel(resume.positionMs, resume.durationMs), 12, Color(0xFFB8B8C0), FontWeight.Medium)
 
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(4.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF55555F))
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color(0x55FFFFFF))
             ) {
-                Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(NetRed))
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .background(NetRed)
+                )
             }
+        }
+
+        Box(
+            Modifier
+                .align(Alignment.Center)
+                .size(52.dp)
+                .background(Color(0x99000000), CircleShape)
+        ) {
+            Label("\u25B6", 20, NetWhite, FontWeight.Bold, Modifier.align(Alignment.Center))
         }
     }
 }
@@ -1246,8 +1449,20 @@ private fun Shelf(
 ) {
     if (films.isEmpty()) return
 
-    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-        Label(title, 20, NetWhite, FontWeight.Bold, Modifier.padding(start = 48.dp, bottom = 10.dp))
+    Column(Modifier.fillMaxWidth().padding(vertical = 16.dp)) {
+        Row(
+            Modifier.padding(start = 48.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                Modifier
+                    .width(4.dp)
+                    .height(22.dp)
+                    .background(NetRed, RoundedCornerShape(2.dp))
+            )
+            Label(title, 21, NetWhite, FontWeight.Bold, tracking = -0.3f)
+        }
 
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
@@ -1256,14 +1471,24 @@ private fun Shelf(
             itemsIndexed(films, key = { _, film -> film.id }) { index, film ->
                 Row(verticalAlignment = Alignment.Bottom) {
                     if (ranked) {
-                        Label(
-                            (index + 1).toString(),
-                            80,
-                            Color(0xFF5E5E6A),
-                            FontWeight.Black,
-                            Modifier.padding(end = 6.dp),
-                            maxLines = 1
-                        )
+                        val numeral = (index + 1).toString()
+                        // oversized outlined numeral, the Netflix "Top 10" signature
+                        Box(
+                            modifier = Modifier
+                                .width(if (numeral.length > 1) 74.dp else 52.dp)
+                                .height(232.dp),
+                            contentAlignment = Alignment.BottomStart
+                        ) {
+                            Label(
+                                numeral,
+                                132,
+                                Color(0xFF0B0B10),
+                                FontWeight.Black,
+                                Modifier.offset(x = (-6).dp, y = (-4).dp),
+                                maxLines = 1,
+                                tracking = -8f
+                            )
+                        }
                     }
 
                     PosterCard(
@@ -1279,20 +1504,34 @@ private fun Shelf(
 
 @Composable
 private fun LoadingState(message: String = "Loading...") {
+    val transition = rememberInfiniteTransition(label = "loading")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1100, easing = LinearEasing)),
+        label = "loading-phase"
+    )
+
     Column(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 56.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        CircularProgressIndicator(color = NetRed)
-        Label(message, 14, NetMuted)
+        Box(Modifier.size(38.dp)) {
+            CircularProgressIndicator(
+                color = NetRed,
+                strokeWidth = 3.5.dp,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+        Label(message, 13, NetMuted, FontWeight.Medium, opacity = 0.55f + 0.45f * (1f - phase))
     }
 }
 
 @Composable
 private fun MessageState(message: String) {
-    Box(Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 48.dp), Alignment.Center) {
-        Label(message, 16, NetWhite, align = TextAlign.Center)
+    Box(Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 56.dp), Alignment.Center) {
+        Label(message, 16, Color(0xFFD2D2D9), align = TextAlign.Center)
     }
 }
 
@@ -1305,45 +1544,54 @@ private fun ActionButton(
     progress: Float = 0f
 ) {
     Focusable(
-        modifier = Modifier.width(320.dp).height(52.dp),
-        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .width(260.dp)
+            .height(52.dp),
+        shape = RoundedCornerShape(6.dp),
         scale = 1.04f,
         border = false,
         enabled = enabled,
         bg = { focused ->
             when {
-                focused -> NetWhite
-                primary -> Color(0xFFE5E5E5)
-                else -> Color(0xFF2A2A33)
+                focused && primary -> Color(0xFFB30D12)
+                primary -> NetRed
+                focused -> Color(0xFF3A3A45)
+                else -> Color(0x80262630)
             }
         },
         onClick = onClick
-    ) { focused ->
+    ) {
         if (progress > 0f) {
             Box(
                 Modifier
                     .align(Alignment.BottomStart)
-                    .fillMaxWidth(progress)
-                    .height(4.dp)
-                    .background(NetRed)
-            )
+                    .fillMaxWidth()
+                    .height(3.dp)
+                    .background(Color(0x33FFFFFF))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxHeight()
+                        .background(NetWhite)
+                )
+            }
         }
 
         Label(
             text = label,
             size = 15,
-            color = if (focused || primary) Color.Black else NetWhite,
-            weight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = 24.dp)
+            color = NetWhite,
+            weight = FontWeight.SemiBold,
+            modifier = Modifier.align(Alignment.CenterStart).padding(horizontal = 22.dp)
         )
     }
 }
 
-// ============================= Screens =============================
-
 @Composable
 private fun HomeScreen(
     state: HomeUiState,
+    onPlay: (Film) -> Unit,
     onOpen: (Film) -> Unit,
     onResume: (Resume) -> Unit
 ) {
@@ -1357,16 +1605,25 @@ private fun HomeScreen(
             val hero = state.catalog.firstOrNull { it.id == heroId } ?: state.catalog.first()
             val onFocus = { film: Film -> heroId = film.id }
 
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
-                item(key = "hero") { HeroBanner(hero) { onOpen(hero) } }
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
+                item(key = "hero") { HeroBanner(film = hero, onPlay = onPlay, onOpen = onOpen) }
 
                 if (state.resume.isNotEmpty()) {
                     item(key = "continue") {
-                        Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
-                            Label(
-                                "Continue Watching", 20, NetWhite, FontWeight.Bold,
-                                Modifier.padding(start = 48.dp, bottom = 10.dp)
-                            )
+                        Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                            Row(
+                                Modifier.padding(start = 48.dp, bottom = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Box(
+                                    Modifier
+                                        .width(4.dp)
+                                        .height(22.dp)
+                                        .background(NetRed, RoundedCornerShape(2.dp))
+                                )
+                                Label("Continue Watching", 21, NetWhite, FontWeight.Bold, tracking = -0.3f)
+                            }
 
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 48.dp),
@@ -1383,21 +1640,31 @@ private fun HomeScreen(
                 item(key = "trending") {
                     Shelf("Top 10 Trending Today", state.catalog.take(10), onOpen, onFocus, ranked = true)
                 }
+
+                items(Screens, key = { it }) { screenName ->
+                    val kind = if (screenName == "Shows") "Series" else "Movie"
+                    if (screenName == "Shows" || screenName == "Movies") {
+                        Shelf(
+                            if (screenName == "Shows") "Popular Series" else "Popular Films",
+                            state.catalog.filter { it.kind == kind }.take(20),
+                            onOpen,
+                            onFocus
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun HeroBanner(film: Film, onOpen: () -> Unit) {
+private fun HeroBanner(film: Film, onPlay: (Film) -> Unit, onOpen: (Film) -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(480.dp)
+            .height(560.dp)
             .background(NetBlack)
-            .clickable(onClick = onOpen)
     ) {
-        // FIX: the old Crossfade rendered an empty Box whenever the backdrop was blank.
         Crossfade(targetState = film.backdrop.ifBlank { film.poster }, label = "hero-backdrop") { art ->
             if (art.isNotBlank()) {
                 AsyncImage(
@@ -1409,41 +1676,110 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
             }
         }
 
+        // left falloff, then a bottom fade, so the type always sits on black
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 250f))
+                .background(
+                    Brush.horizontalGradient(
+                        0f to NetBlack.copy(alpha = 0.96f),
+                        0.5f to NetBlack.copy(alpha = 0.55f),
+                        1f to Color.Transparent
+                    )
+                )
         )
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.92f), Color.Transparent), endX = 700f)
+                    Brush.verticalGradient(
+                        0f to NetBlack.copy(alpha = 0.35f),
+                        0.45f to Color.Transparent,
+                        1f to NetBlack
+                    )
                 )
         )
 
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 48.dp, bottom = 40.dp)
-                .width(650.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(start = 48.dp, bottom = 56.dp)
+                .width(660.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Label("TOP 10 - TRENDING TODAY", 11, NetMuted, FontWeight.Bold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier
+                        .background(NetRed, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Kicker(film.kind.uppercase(), NetWhite)
+                }
+                if (film.rating.isNotBlank()) {
+                    Label("\u2605 " + film.rating, 14, NetGreen, FontWeight.Bold)
+                }
+            }
 
-            Label(film.name, 44, NetWhite, FontWeight.Black, maxLines = 1)
+            Label(
+                film.name, 58, NetWhite, FontWeight.Black,
+                tracking = -1.8f, maxLines = 2
+            )
 
             Row(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (film.rating.isNotBlank()) Label("\u2605 " + film.rating, 13, NetGreen, FontWeight.Bold)
-                Label(film.year, 13, NetMuted)
-                Label("?", 13, NetMuted)
-                Label(film.kind, 13, NetMuted)
+                Label(film.year, 15, Color(0xFFD2D2D9), FontWeight.SemiBold)
+                Label("\u00B7", 15, NetMuted)
+                Label(film.kind, 15, Color(0xFFD2D2D9))
             }
 
-            Label(film.overview, 14, NetWhite.copy(alpha = 0.9f), maxLines = 2)
+            Label(
+                film.overview,
+                16, Color(0xFFE6E6EA),
+                modifier = Modifier.width(600.dp),
+                maxLines = 3
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Focusable(
+                    modifier = Modifier.width(190.dp).height(56.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    scale = 1.05f,
+                    border = false,
+                    bg = { focused -> if (focused) Color(0xFFB30D12) else NetRed },
+                    onClick = { onPlay(film) }
+                ) {
+                    Row(
+                        Modifier.align(Alignment.Center),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Label("\u25B6", 16, NetWhite, FontWeight.Bold)
+                        Label("Play", 17, NetWhite, FontWeight.Bold)
+                    }
+                }
+
+                Focusable(
+                    modifier = Modifier.width(200.dp).height(56.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    scale = 1.05f,
+                    border = false,
+                    bg = { focused -> if (focused) Color(0xFF3A3A45) else Color(0x80262630) },
+                    onClick = { onOpen(film) }
+                ) {
+                    Row(
+                        Modifier.align(Alignment.Center),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Label("\u24D8", 16, NetWhite, FontWeight.Bold)
+                        Label("More Info", 16, NetWhite, FontWeight.SemiBold)
+                    }
+                }
+            }
         }
     }
 }
@@ -1520,7 +1856,6 @@ private fun SearchScreen(
         }
     }
 }
-
 @Composable
 private fun DetailsScreen(
     state: DetailUiState,
@@ -1529,6 +1864,8 @@ private fun DetailsScreen(
     onFindFiles: () -> Unit,
     onPickFile: (TbFile, Long) -> Unit,
     onSelectSeason: (Int) -> Unit,
+    onToggleEpisodes: () -> Unit,
+    onPlayEpisode: (Film, Episode) -> Unit,
     onToggleWatchlist: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -1540,126 +1877,407 @@ private fun DetailsScreen(
     } else 0f
 
     Box(Modifier.fillMaxSize().background(NetBlack)) {
-        if (film.backdrop.isNotBlank()) {
-            AsyncImage(
-                model = film.backdrop,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
+        Crossfade(targetState = film.backdrop.ifBlank { film.poster }, label = "detail-art") { art ->
+            if (art.isNotBlank()) {
+                AsyncImage(
+                    model = art,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
         }
 
+        // three stacked scrims: left-to-right falloff, a bottom fade, and a vignette
         Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        listOf(NetBlack, NetBlack.copy(alpha = 0.92f), NetBlack.copy(alpha = 0.35f))
-                    )
+            Modifier.fillMaxSize().background(
+                Brush.horizontalGradient(
+                    0f to NetBlack,
+                    0.55f to NetBlack.copy(alpha = 0.94f),
+                    1f to NetBlack.copy(alpha = 0.25f)
                 )
+            )
         )
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    0f to Color.Transparent,
+                    0.45f to Color.Transparent,
+                    1f to NetBlack
+                )
+            )
+        )
+
+        Focusable(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(24.dp)
+                .size(48.dp),
+            shape = CircleShape,
+            scale = 1.1f,
+            border = false,
+            lift = false,
+            bg = { if (it) NetWhite else Color(0x99101010) },
+            onClick = onClose
+        ) { focused ->
+            Label(
+                "\u2715", 16,
+                if (focused) Color.Black else NetWhite,
+                FontWeight.Bold,
+                Modifier.align(Alignment.Center)
+            )
+        }
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 56.dp, vertical = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Label(film.name, 42, NetWhite, FontWeight.Black, Modifier.weight(1f))
-                ActionButton(label = "Close", onClick = onClose)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier
+                        .background(NetRed, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Kicker(film.kind.uppercase(), NetWhite)
+                }
+                if (hasProgress) {
+                    Kicker(
+                        (state.resumePositionMs / 60_000L).toString() + " MIN WATCHED",
+                        NetMuted
+                    )
+                }
             }
 
+            Label(film.name, 44, NetWhite, FontWeight.Black, tracking = -1.2f, maxLines = 2)
+
             Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (film.rating.isNotBlank()) Label("\u2605 " + film.rating, 15, NetGreen, FontWeight.Bold)
-                Label(film.year, 15, NetWhite, FontWeight.Medium)
+                if (film.rating.isNotBlank()) {
+                    Label("\u2605 " + film.rating, 16, NetGreen, FontWeight.Bold)
+                }
+                Label(film.year, 15, Color(0xFFD2D2D9), FontWeight.SemiBold)
                 Label(film.kind, 15, NetMuted)
             }
 
-            Label(film.overview, 15, NetWhite, modifier = Modifier.width(600.dp), maxLines = 4)
-
-            Spacer(Modifier.height(4.dp))
-
-            ActionButton(
-                label = when {
-                    state.isLoading -> "Loading..."
-                    hasProgress -> "Resume - " + (state.resumePositionMs / 60_000L) + " min in"
-                    else -> "Play"
-                },
-                primary = true,
-                enabled = !state.isLoading,
-                progress = progress,
-                onClick = { onPlay(state.resumePositionMs) }
+            Label(
+                film.overview.ifBlank { "No synopsis is available for this title yet." },
+                16,
+                Color(0xFFE6E6EA),
+                modifier = Modifier.width(620.dp),
+                maxLines = 4
             )
 
-            ActionButton(
-                label = if (film.kind == "Series") "Episodes" else "Find in TorBox",
-                onClick = onFindFiles
-            )
+            Spacer(Modifier.height(6.dp))
 
-            ActionButton(
-                label = if (isInWatchlist) "Added to My List" else "Add to My List",
-                onClick = onToggleWatchlist
-            )
-
-            if (state.message.isNotBlank()) {
-                Label(state.message, 14, NetMuted, modifier = Modifier.padding(top = 4.dp))
-            }
-
-            if (film.kind == "Series") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    (1..5).forEach { season ->
-                        val selected = state.season == season
-                        Focusable(
-                            shape = RoundedCornerShape(50.dp),
-                            scale = 1.05f,
-                            border = false,
-                            bg = { if (selected) NetWhite else Color(0xFF2A2A33) },
-                            onClick = { onSelectSeason(season) }
-                        ) { focused ->
+            // -- primary row: Play + My List, Netflix pill pair --
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box {
+                    Focusable(
+                        modifier = Modifier.width(230.dp).height(56.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        scale = 1.04f,
+                        border = false,
+                        enabled = !state.isLoading,
+                        bg = { if (it) Color(0xFFB30D12) else NetRed },
+                        onClick = { onPlay(state.resumePositionMs) }
+                    ) {
+                        if (progress > 0f) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.BottomStart)
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .background(Color(0x33FFFFFF))
+                            ) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth(progress)
+                                        .fillMaxHeight()
+                                        .background(NetWhite)
+                                )
+                            }
+                        }
+                        Row(
+                            Modifier.align(Alignment.Center),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Label("\u25B6", 16, NetWhite)
                             Label(
-                                "S" + season,
-                                13,
-                                if (selected || focused) Color.Black else NetWhite,
-                                FontWeight.Bold,
-                                Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                when {
+                                    state.isLoading -> "Loading"
+                                    hasProgress -> "Resume"
+                                    else -> "Play"
+                                },
+                                17, NetWhite, FontWeight.Bold
                             )
                         }
                     }
                 }
 
-                state.episodes.forEach { episode ->
-                    ActionButton(label = episode.code + "  " + episode.name, onClick = { onPlay(0L) })
-                }
-            }
-
-            if (state.matches.isNotEmpty()) {
-                Label("Select a file from TorBox", 18, NetWhite, FontWeight.Bold, Modifier.padding(top = 8.dp))
-
-                state.matches.forEach { file ->
-                    Focusable(
-                        modifier = Modifier.fillMaxWidth(),
-                        scale = 1.02f,
-                        onClick = { onPickFile(file, state.resumePositionMs) }
+                Focusable(
+                    modifier = Modifier.width(210.dp).height(56.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    scale = 1.04f,
+                    border = false,
+                    bg = { focused ->
+                        if (focused) Color(0xFF3A3A45) else Color(0x80262630)
+                    },
+                    onClick = onToggleWatchlist
+                ) {
+                    Row(
+                        Modifier.align(Alignment.Center),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Label(
-                            file.name + " (" + formatFileSize(file.size) + ")",
-                            14,
-                            NetWhite,
-                            modifier = Modifier.padding(16.dp)
+                            if (isInWatchlist) "\u2713" else "+", 18,
+                            if (isInWatchlist) NetGreen else NetWhite, FontWeight.Bold
+                        )
+                        Label(
+                            if (isInWatchlist) "In My List" else "My List",
+                            16, NetWhite, FontWeight.SemiBold
                         )
                     }
                 }
             }
 
-            Spacer(Modifier.height(32.dp))
+            // -- secondary row: Episodes / Find in TorBox --
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (film.kind == "Series") {
+                    Focusable(
+                        modifier = Modifier.width(230.dp).height(48.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        scale = 1.03f,
+                        border = false,
+                        bg = { focused ->
+                            if (focused) Color(0xFF3A3A45) else Color(0x80262630)
+                        },
+                        onClick = onToggleEpisodes
+                    ) {
+                        Row(
+                            Modifier.align(Alignment.Center),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Label(
+                                if (state.showEpisodes) "\u2303" else "\u2304", 16, NetWhite, FontWeight.Bold
+                            )
+                            Label(
+                                if (state.showEpisodes) "Hide Episodes" else "Episodes",
+                                15, NetWhite, FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                Focusable(
+                    modifier = Modifier.width(230.dp).height(48.dp),
+                    shape = RoundedCornerShape(6.dp),
+                    scale = 1.03f,
+                    border = false,
+                    bg = { focused ->
+                        if (focused) Color(0xFF3A3A45) else Color(0x80262630)
+                    },
+                    onClick = onFindFiles
+                ) {
+                    Row(
+                        Modifier.align(Alignment.Center),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Label("\u2E31", 16, NetMuted, FontWeight.Bold)
+                        Label("Find in TorBox", 15, NetWhite, FontWeight.SemiBold)
+                    }
+                }
+            }
+
+            if (state.message.isNotBlank()) {
+                Label(state.message, 14, NetMuted)
+            }
+
+            // -- EPISODES --
+            if (film.kind == "Series" && state.showEpisodes) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Label("Episodes", 24, NetWhite, FontWeight.Bold)
+                        Label("Season " + state.season, 14, NetMuted, FontWeight.SemiBold)
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.seasons.forEach { season ->
+                            val selected = state.season == season
+                            Focusable(
+                                shape = RoundedCornerShape(6.dp),
+                                scale = 1.06f,
+                                border = false,
+                                lift = false,
+                                bg = { focused ->
+                                    when {
+                                        selected -> NetWhite
+                                        focused -> Color(0xFF3A3A45)
+                                        else -> Color(0x80262630)
+                                    }
+                                },
+                                onClick = { onSelectSeason(season) }
+                            ) { focused ->
+                                Label(
+                                    "S" + season,
+                                    14,
+                                    if (selected || focused) Color.Black else NetWhite,
+                                    FontWeight.Bold,
+                                    Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    when {
+                        state.episodesLoading -> EpisodeSkeleton()
+                        state.episodesError.isNotBlank() -> Label(state.episodesError, 14, NetMuted)
+                        state.episodes.isEmpty() ->
+                            Label("No episode information available for this season.", 14, NetMuted)
+                        else -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            state.episodes.forEachIndexed { index, episode ->
+                                EpisodeRow(
+                                    episode = episode,
+                                    index = index,
+                                    onClick = { onPlayEpisode(film, episode) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // -- TorBox matches --
+            if (state.matches.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Label("In your TorBox library", 24, NetWhite, FontWeight.Bold)
+                    state.matches.forEach { file ->
+                        Focusable(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(6.dp),
+                            scale = 1.01f,
+                            bg = { focused ->
+                                if (focused) Color(0xFF2E2E39) else Color(0xFF16161D)
+                            },
+                            onClick = { onPickFile(file, state.resumePositionMs) }
+                        ) { focused ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Label("\u25B6", 14, if (focused) NetRed else NetMuted)
+                                Spacer(Modifier.width(14.dp))
+                                Label(
+                                    file.name, 14, NetWhite, FontWeight.Medium,
+                                    Modifier.weight(1f), maxLines = 1
+                                )
+                                Label(formatFileSize(file.size), 13, NetMuted, FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(40.dp))
         }
     }
 }
+
+/** One Netflix-style episode row: still, ordinal, title, runtime, synopsis. */
+@Composable
+private fun EpisodeRow(episode: Episode, index: Int, onClick: () -> Unit) {
+    Focusable(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(6.dp),
+        scale = 1.012f,
+        bg = { focused -> if (focused) Color(0xFF2E2E39) else Color(0xFF16161D) },
+        onClick = onClick
+    ) { focused ->
+        Row(
+            Modifier.fillMaxWidth().padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                Modifier
+                    .width(150.dp)
+                    .height(86.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF22222B))
+            ) {
+                if (episode.still.isNotBlank()) {
+                    AsyncImage(
+                        model = episode.still,
+                        contentDescription = episode.name,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.5f to Color.Transparent,
+                                1f to Color(0x99000000)
+                            )
+                        )
+                )
+                if (focused) {
+                    Box(
+                        Modifier.fillMaxSize().background(Color(0x66000000)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Label("\u25B6", 22, NetWhite)
+                    }
+                }
+                Kicker(episode.code, Color(0xFFE6E6EA), Modifier.align(Alignment.BottomStart).padding(6.dp))
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Label((index + 1).toString(), 15, NetMuted, FontWeight.Bold)
+                    Spacer(Modifier.width(8.dp))
+                    Label(episode.name, 16, NetWhite, FontWeight.Bold, Modifier.weight(1f), maxLines = 1)
+                    if (episode.runtime.isNotBlank()) {
+                        Label(episode.runtime, 13, NetMuted, FontWeight.SemiBold)
+                    }
+                }
+                if (episode.overview.isNotBlank()) {
+                    Label(episode.overview, 13, NetMuted, maxLines = 2)
+                } else if (episode.airDate.isNotBlank()) {
+                    Label("Aired " + episode.airDate, 13, NetMuted)
+                }
+            }
+        }
+    }
+}
+
+/** Placeholder rows while TMDB responds, so the section never jumps. */
+@Composable
+private fun EpisodeSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        repeat(4) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(106.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color(0xFF16161D))
+            )
+        }
+    }
+}
+
 
 @Composable
 private fun SettingsField(label: String, value: String, onChange: (String) -> Unit) {

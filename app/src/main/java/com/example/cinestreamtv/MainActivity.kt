@@ -1,7 +1,7 @@
 package com.example.cinestreamtv
 
 /*
- * CineStream TV — rewritten MainActivity.kt
+ * CineStream TV - rewritten MainActivity.kt
  *
  * The layout/feature set is identical to the original file. What changed:
  *   1. progress is no longer wiped by ExoPlayer's buffering callback
@@ -122,7 +122,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
-// ───────────────────────────── Theme ─────────────────────────────
+// ============================= Theme =============================
 
 private val NetBlack = Color(0xFF0B0B10)
 private val NetDarkGray = Color(0xFF17171E)
@@ -134,7 +134,7 @@ private val NetGreen = Color(0xFF46D369)
 
 private val Screens = listOf("Search", "Home", "Shows", "Movies", "My List", "Settings")
 
-// ───────────────────────────── Models ─────────────────────────────
+// ============================= Models =============================
 
 data class Film(
     val id: String,
@@ -220,7 +220,7 @@ data class Episode(
     val runtime: String
 )
 
-// ───────────────────────────── Helpers ─────────────────────────────
+// ============================= Helpers =============================
 
 private fun JSONObject.safeString(key: String): String =
     if (isNull(key)) "" else optString(key, "")
@@ -228,7 +228,7 @@ private fun JSONObject.safeString(key: String): String =
 private fun normalizeTitle(value: String): String =
     value.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
 
-/** 3 → "1h 03m", used by the resume cards. */
+/** 3 -> "1h 03m", used by the resume cards. */
 private fun remainingLabel(positionMs: Long, durationMs: Long): String {
     if (durationMs <= 0L) return "Continue watching"
     val minutes = ((durationMs - positionMs) / 60_000L).coerceAtLeast(0L)
@@ -257,7 +257,7 @@ private fun tokenOverlap(a: String, b: String): Double {
     return left.intersect(right).size.toDouble() / left.size.coerceAtMost(right.size)
 }
 
-// ───────────────────────────── Storage ─────────────────────────────
+// ============================= Storage =============================
 
 internal class AppStorage(private val prefs: SharedPreferences) {
 
@@ -317,7 +317,7 @@ internal class AppStorage(private val prefs: SharedPreferences) {
     fun loadTmdbKey(): String = prefs.getString("tmdb_key", "").orEmpty()
 }
 
-// ───────────────────────────── Network ─────────────────────────────
+// ============================= Network =============================
 
 private object Http {
 
@@ -352,7 +352,7 @@ private object Http {
         ?: "HTTP $status"
 }
 
-// ───────────────────────────── TMDB ─────────────────────────────
+// ============================= TMDB =============================
 
 private object TmdbRepository {
 
@@ -448,7 +448,7 @@ private object TmdbRepository {
     }
 }
 
-// ───────────────────────────── TorBox ─────────────────────────────
+// ============================= TorBox =============================
 
 private object TorBoxRepository {
 
@@ -531,7 +531,7 @@ private object TorBoxRepository {
     }
 }
 
-// ───────────────────────────── ViewModel ─────────────────────────────
+// ============================= ViewModel =============================
 
 internal class AppViewModel(private val store: AppStorage) : ViewModel() {
 
@@ -560,7 +560,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
     private var searchJob: Job? = null
     private var episodesJob: Job? = null
 
-    // ── Catalog: the ViewModel no longer debounces, the caller owns that. ──
+    // == Catalog: the ViewModel no longer debounces, the caller owns that. ==
 
     fun loadCatalog(apiKey: String) {
         catalogJob?.cancel()
@@ -598,7 +598,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
         }
     }
 
-    // ── Search ──
+    // == Search ==
 
     fun onSearchQueryChange(value: String) {
         _search.update { it.copy(query = value, error = "") }
@@ -644,7 +644,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
         }
     }
 
-    // ── Details, watchlist, episodes ──
+    // == Details, watchlist, episodes ==
 
     fun openDetails(film: Film) {
         val name = normalizeTitle(film.name)
@@ -698,7 +698,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
         _home.update { it.copy(watchlist = updated) }
     }
 
-    // ── TorBox lookup & playback ──
+    // == TorBox lookup & playback ==
 
     fun findTorBoxMatches() = lookup()
 
@@ -832,7 +832,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
         _home.update { it.copy(resume = updated) }
     }
 
-    // ── Settings ──
+    // == Settings ==
 
     fun onTorboxKeyChange(value: String) {
         val trimmed = value.trim()
@@ -903,7 +903,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
     }
 }
 
-// ───────────────────────────── Activity ─────────────────────────────
+// ============================= Activity =============================
 
 class MainActivity : ComponentActivity() {
 
@@ -1055,7 +1055,7 @@ private fun CineStreamApp(viewModel: AppViewModel) {
     }
 }
 
-// ───────────────────────────── Reusable UI ─────────────────────────────
+// ============================= Reusable UI =============================
 
 @Composable
 private fun Label(
@@ -1182,7 +1182,7 @@ private fun PosterCard(film: Film, onFocus: (Boolean) -> Unit = {}, onClick: () 
                     .background(Color(0xB3000000), RoundedCornerShape(5.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
-                Label("★ " + film.rating, 11, NetGreen, FontWeight.Bold)
+                Label("\u2605 " + film.rating, 11, NetGreen, FontWeight.Bold)
             }
         }
     }
@@ -1338,7 +1338,7 @@ private fun ActionButton(
     }
 }
 
-// ───────────────────────────── Screens ─────────────────────────────
+// ============================= Screens =============================
 
 @Composable
 private fun HomeScreen(
@@ -1436,9 +1436,9 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (film.rating.isNotBlank()) Label("★ " + film.rating, 13, NetGreen, FontWeight.Bold)
+                if (film.rating.isNotBlank()) Label("\u2605 " + film.rating, 13, NetGreen, FontWeight.Bold)
                 Label(film.year, 13, NetMuted)
-                Label("•", 13, NetMuted)
+                Label("?", 13, NetMuted)
                 Label(film.kind, 13, NetMuted)
             }
 
@@ -1574,7 +1574,7 @@ private fun DetailsScreen(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (film.rating.isNotBlank()) Label("★ " + film.rating, 15, NetGreen, FontWeight.Bold)
+                if (film.rating.isNotBlank()) Label("\u2605 " + film.rating, 15, NetGreen, FontWeight.Bold)
                 Label(film.year, 15, NetWhite, FontWeight.Medium)
                 Label(film.kind, 15, NetMuted)
             }
@@ -1715,7 +1715,7 @@ private fun SettingsScreen(
     }
 }
 
-// ───────────────────────────── Player ─────────────────────────────
+// ============================= Player =============================
 
 @Composable
 private fun PlayerScreen(
@@ -1854,4 +1854,3 @@ private fun PlayerScreen(
     }
 }
 }
-

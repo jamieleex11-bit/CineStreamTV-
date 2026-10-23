@@ -153,6 +153,9 @@ private val POSTER_HEIGHT = 230.dp
 private val CARD_GAP = 16.dp
 private val RANK_SLOT = 56.dp
 /** 0-3dp. Netflix TV tiles are effectively square-cornered. */
+/** Strips the trailing "S01E03" from a saved resume title. */
+private val EPISODE_TAIL_REGEX = Regex("(?i)\\s*s\\s?\\d+\\s*e\\s?\\d+.*$")
+
 private val POSTER_RADIUS = 3.dp
 private val HERO_HEIGHT = 600.dp
 private const val HERO_ROTATE_MS = 9_000
@@ -1953,8 +1956,11 @@ private fun ProviderShelf(
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (logo != null) {
+                // LocalContext.current is a composable call, so it has to be read
+                // OUTSIDE remember{} - the remember lambda is not composable.
+                val logoContext = LocalContext.current
                 val logoRequest = remember(logo) {
-                    ImageRequest.Builder(LocalContext.current)
+                    ImageRequest.Builder(logoContext)
                         .data(logo)
                         .size(68, 68)
                         .build()
@@ -2182,8 +2188,10 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
                 .padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            val code = TorBoxRepository.EPISODE_IN_NAME.matcher(resume.name).let { m ->
-                if (m.find()) m.group(0)?.uppercase()?.replace(" ", "") else ""
+            // group(0) is String?, so the whole let{} was String? and both the
+            // isNotBlank() check and the Label argument failed to type-check.
+            val code: String = TorBoxRepository.EPISODE_IN_NAME.matcher(resume.name).let { m ->
+                if (m.find()) m.group(0)?.uppercase()?.replace(" ", "") ?: "" else ""
             }
             if (code.isNotBlank()) {
                 Label(
@@ -2192,7 +2200,7 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
                 )
             }
             Label(
-                resume.name.replace(Regex("(?i)\s*s\d+\s*e\d+.*$"), "").trim(),
+                resume.name.replace(EPISODE_TAIL_REGEX, "").trim(),
                 14, NetWhite, FontWeight.Bold, maxLines = 1
             )
             Label(remainingLabel(resume.positionMs, resume.durationMs), 11, NetMuted)

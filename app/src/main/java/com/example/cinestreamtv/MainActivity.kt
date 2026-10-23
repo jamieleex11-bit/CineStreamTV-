@@ -1,5 +1,5 @@
 package com.example.cinestreamtv
- 
+
 import android.app.Activity
 import android.content.Context
 import android.content.SharedPreferences
@@ -92,9 +92,9 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
- 
+
 // ───────────────────────────── Theme ─────────────────────────────
- 
+
 private val NetBlack = Color(0xFF0B0B10)
 private val NetDarkGray = Color(0xFF17171E)
 private val NetRed = Color(0xFFE50914)
@@ -102,12 +102,12 @@ private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF9A9AA6)
 private val JamieGold = Color(0xFFFFD166)
 private val NetGreen = Color(0xFF46D369)
- 
+
 private val Providers = listOf("Netflix", "Apple TV+", "Disney+", "MAX", "Prime Video")
 private val Screens = listOf("Search", "Home", "Shows", "Movies", "My List", "Settings")
- 
+
 // ───────────────────────────── Models ─────────────────────────────
- 
+
 data class Film(
     val id: String,
     val tmdbId: Int,
@@ -120,7 +120,7 @@ data class Film(
     val rating: String,
     val provider: String
 )
- 
+
 data class Resume(
     val name: String,
     val image: String,
@@ -132,9 +132,9 @@ data class Resume(
 ) {
     val key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
 }
- 
+
 data class TbFile(val torrentId: Int, val fileId: Int, val name: String, val size: Long)
- 
+
 data class PlayRequest(
     val name: String,
     val image: String,
@@ -145,7 +145,7 @@ data class PlayRequest(
 ) {
     val key: String get() = if (torrentId >= 0) "tb$torrentId:$fileId" else url
 }
- 
+
 data class HomeUiState(
     val catalog: List<Film> = emptyList(),
     val resume: List<Resume> = emptyList(),
@@ -153,27 +153,27 @@ data class HomeUiState(
     val isLoadingCatalog: Boolean = false,
     val catalogError: String = ""
 )
- 
+
 data class SearchUiState(
     val query: String = "",
     val results: List<Film> = emptyList(),
     val isSearching: Boolean = false,
     val error: String = ""
 )
- 
+
 data class LibraryUiState(
     val files: List<TbFile> = emptyList(),
     val isLoading: Boolean = false,
     val status: String = ""
 )
- 
+
 data class SettingsUiState(
     val torboxKey: String = "",
     val tmdbKey: String = "",
     val torboxStatus: String = "",
     val directLink: String = ""
 )
- 
+
 data class DetailUiState(
     val film: Film? = null,
     val matches: List<TbFile> = emptyList(),
@@ -182,33 +182,33 @@ data class DetailUiState(
     val resumePositionMs: Long = 0L,
     val resumeDurationMs: Long = 0L
 )
- 
+
 // ───────────────────────────── Helpers ─────────────────────────────
- 
+
 private fun JSONObject.safeString(key: String): String =
     if (isNull(key)) "" else optString(key, "")
- 
+
 private fun normalizeTitle(value: String): String =
     value.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim()
- 
+
 private fun formatFileSize(bytes: Long): String {
     val gb = bytes / 1_073_741_824.0
     return if (gb >= 1.0) "${Math.round(gb * 10.0) / 10.0} GB" else "${bytes / 1_048_576} MB"
 }
- 
+
 // ───────────────────────────── Storage ─────────────────────────────
- 
+
 internal class AppStorage(private val prefs: SharedPreferences) {
- 
+
     private fun <T> load(key: String, parse: (JSONObject) -> T): List<T> = runCatching {
         val array = JSONArray(prefs.getString(key, "[]") ?: "[]")
         List(array.length()) { parse(array.getJSONObject(it)) }
     }.getOrDefault(emptyList())
- 
+
     private fun save(key: String, items: List<JSONObject>) {
         prefs.edit().putString(key, JSONArray(items).toString()).apply()
     }
- 
+
     fun loadResume(): List<Resume> = load("resume") {
         Resume(
             name = it.safeString("name"),
@@ -220,14 +220,14 @@ internal class AppStorage(private val prefs: SharedPreferences) {
             durationMs = it.optLong("durationMs", 0L)
         )
     }
- 
+
     fun saveResume(items: List<Resume>) = save("resume", items.map {
         JSONObject()
             .put("name", it.name).put("image", it.image).put("url", it.url)
             .put("torrentId", it.torrentId).put("fileId", it.fileId)
             .put("positionMs", it.positionMs).put("durationMs", it.durationMs)
     })
- 
+
     fun loadWatchlist(): List<Film> = load("watchlist") {
         Film(
             id = it.safeString("id"),
@@ -242,7 +242,7 @@ internal class AppStorage(private val prefs: SharedPreferences) {
             provider = it.safeString("provider")
         )
     }
- 
+
     fun saveWatchlist(items: List<Film>) = save("watchlist", items.map {
         JSONObject()
             .put("id", it.id).put("tmdbId", it.tmdbId).put("name", it.name)
@@ -250,19 +250,19 @@ internal class AppStorage(private val prefs: SharedPreferences) {
             .put("backdrop", it.backdrop).put("overview", it.overview)
             .put("rating", it.rating).put("provider", it.provider)
     })
- 
+
     fun saveTorboxKey(value: String) = prefs.edit().putString("torbox_token", value).apply()
     fun saveTmdbKey(value: String) = prefs.edit().putString("tmdb_key", value).apply()
     fun loadTorboxKey(): String = prefs.getString("torbox_token", "").orEmpty()
     fun loadTmdbKey(): String = prefs.getString("tmdb_key", "").orEmpty()
 }
- 
+
 // ───────────────────────────── Network ─────────────────────────────
- 
+
 private object Http {
- 
+
     class HttpException(val statusCode: Int, val body: String) : Exception("HTTP $statusCode")
- 
+
     fun get(url: String, bearerToken: String? = null): String {
         val connection = URL(url).openConnection() as HttpURLConnection
         return try {
@@ -272,11 +272,11 @@ private object Http {
             if (!bearerToken.isNullOrBlank()) {
                 connection.setRequestProperty("Authorization", "Bearer $bearerToken")
             }
- 
+
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val body = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
- 
+
             if (status !in 200..299) throw HttpException(status, body)
             body
         } finally {
@@ -284,11 +284,11 @@ private object Http {
         }
     }
 }
- 
+
 private object TmdbRepository {
- 
+
     private const val BASE_URL = "https://api.themoviedb.org/3"
- 
+
     suspend fun loadTrending(apiKey: String): Result<List<Film>> = withContext(Dispatchers.IO) {
         runCatching {
             // All 5 pages load at the same time = much faster home screen.
@@ -299,7 +299,7 @@ private object TmdbRepository {
             }.flatten().distinctBy { it.id }
         }
     }
- 
+
     suspend fun search(apiKey: String, query: String): Result<List<Film>> =
         withContext(Dispatchers.IO) {
             runCatching {
@@ -307,33 +307,33 @@ private object TmdbRepository {
                 parseFilms(request("/search/multi?query=$q&include_adult=false", apiKey))
             }
         }
- 
+
     private fun parseFilms(response: String): List<Film> {
         val results = JSONObject(response).optJSONArray("results") ?: return emptyList()
         return (0 until results.length()).mapNotNull { results.optJSONObject(it)?.toFilm() }
     }
- 
+
     private fun request(path: String, apiKey: String): String {
         val usesBearer = apiKey.length > 40
         val separator = if (path.contains("?")) "&" else "?"
         val url = if (usesBearer) "$BASE_URL$path" else "$BASE_URL$path${separator}api_key=$apiKey"
         return Http.get(url, if (usesBearer) apiKey else null)
     }
- 
+
     private fun JSONObject.toFilm(): Film? {
         val mediaType = safeString("media_type")
         if (mediaType != "movie" && mediaType != "tv") return null
- 
+
         val posterPath = safeString("poster_path")
         if (posterPath.isBlank()) return null
- 
+
         val title = safeString("title").ifBlank { safeString("name") }
         if (title.isBlank()) return null
- 
+
         val tmdbId = optInt("id", 0)
         val backdropPath = safeString("backdrop_path")
         val rating = optDouble("vote_average", 0.0)
- 
+
         return Film(
             id = "$mediaType$tmdbId",
             tmdbId = tmdbId,
@@ -348,29 +348,29 @@ private object TmdbRepository {
         )
     }
 }
- 
+
 private object TorBoxRepository {
- 
+
     private const val BASE_URL = "https://api.torbox.app/v1/api"
     private val videoExtensions = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".ts")
- 
+
     suspend fun loadLibrary(apiKey: String): Result<List<TbFile>> = withContext(Dispatchers.IO) {
         runCatching {
             val data = JSONObject(
                 Http.get("$BASE_URL/torrents/mylist?limit=100&offset=0", apiKey)
             ).optJSONArray("data") ?: return@runCatching emptyList()
- 
+
             val files = mutableListOf<TbFile>()
- 
+
             for (i in 0 until data.length()) {
                 val torrent = data.optJSONObject(i) ?: continue
                 val torrentId = torrent.optInt("id", -1)
                 val torrentFiles = torrent.optJSONArray("files") ?: continue
- 
+
                 for (j in 0 until torrentFiles.length()) {
                     val file = torrentFiles.optJSONObject(j) ?: continue
                     val name = file.safeString("name")
- 
+
                     if (videoExtensions.any { name.lowercase().endsWith(it) }) {
                         files.add(
                             TbFile(
@@ -386,62 +386,62 @@ private object TorBoxRepository {
             files
         }
     }
- 
+
     suspend fun requestStreamLink(apiKey: String, torrentId: Int, fileId: Int): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val url = "$BASE_URL/torrents/requestdl?token=$apiKey" +
                     "&torrent_id=$torrentId&file_id=$fileId&zip_link=false"
                 val response = JSONObject(Http.get(url))
- 
+
                 require(response.optBoolean("success", false)) { "TorBox did not return a stream link." }
                 response.safeString("data").also {
                     require(it.isNotBlank()) { "TorBox returned an empty stream link." }
                 }
             }
         }
- 
+
     suspend fun testConnection(apiKey: String): Result<Boolean> = withContext(Dispatchers.IO) {
         runCatching {
             JSONObject(Http.get("$BASE_URL/user/me", apiKey)).optBoolean("success", false)
         }
     }
 }
- 
+
 // ───────────────────────────── ViewModel ─────────────────────────────
- 
+
 internal class AppViewModel(private val store: AppStorage) : ViewModel() {
- 
+
     private val _home = MutableStateFlow(
         HomeUiState(resume = store.loadResume(), watchlist = store.loadWatchlist())
     )
     val home: StateFlow<HomeUiState> = _home.asStateFlow()
- 
+
     private val _search = MutableStateFlow(SearchUiState())
     val search: StateFlow<SearchUiState> = _search.asStateFlow()
- 
+
     private val _library = MutableStateFlow(LibraryUiState())
- 
+
     private val _settings = MutableStateFlow(
         SettingsUiState(torboxKey = store.loadTorboxKey(), tmdbKey = store.loadTmdbKey())
     )
     val settings: StateFlow<SettingsUiState> = _settings.asStateFlow()
- 
+
     private val _detail = MutableStateFlow(DetailUiState())
     val detail: StateFlow<DetailUiState> = _detail.asStateFlow()
- 
+
     private val _playRequest = MutableStateFlow<PlayRequest?>(null)
     val playRequest: StateFlow<PlayRequest?> = _playRequest.asStateFlow()
- 
+
     private var catalogJob: Job? = null
     private var searchJob: Job? = null
- 
+
     // ── Catalog ──
- 
+
     fun loadCatalog() {
         val tmdbKey = _settings.value.tmdbKey
         catalogJob?.cancel()
- 
+
         if (tmdbKey.isBlank()) {
             _home.update {
                 it.copy(
@@ -452,9 +452,9 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
             }
             return
         }
- 
+
         _home.update { it.copy(isLoadingCatalog = true, catalogError = "") }
- 
+
         catalogJob = viewModelScope.launch {
             delay(400) // wait while the key is still being typed
             TmdbRepository.loadTrending(tmdbKey)
@@ -477,20 +477,20 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
                 }
         }
     }
- 
+
     // ── Search ──
- 
+
     fun onSearchQueryChange(value: String) {
         _search.update { it.copy(query = value, error = "") }
         searchJob?.cancel()
- 
+
         if (value.isBlank()) {
             _search.update { it.copy(results = emptyList(), isSearching = false) }
             return
         }
- 
+
         val tmdbKey = _settings.value.tmdbKey
- 
+
         if (tmdbKey.isBlank()) {
             val local = _home.value.catalog.filter { it.name.contains(value, ignoreCase = true) }
             _search.update {
@@ -502,9 +502,9 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
             }
             return
         }
- 
+
         _search.update { it.copy(isSearching = true) }
- 
+
         searchJob = viewModelScope.launch {
             delay(350)
             TmdbRepository.search(tmdbKey, value)
@@ -528,66 +528,66 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
                 }
         }
     }
- 
+
     // ── Details & watchlist ──
- 
+
     fun openDetails(film: Film) {
         val name = normalizeTitle(film.name)
         val resumeItem = _home.value.resume.firstOrNull {
             name.isNotBlank() && normalizeTitle(it.name).contains(name)
         }
- 
+
         _detail.value = DetailUiState(
             film = film,
             resumePositionMs = resumeItem?.positionMs ?: 0L,
             resumeDurationMs = resumeItem?.durationMs ?: 0L
         )
     }
- 
+
     fun closeDetails() {
         _detail.value = DetailUiState()
     }
- 
+
     fun toggleWatchlist(film: Film) {
         val current = _home.value.watchlist
         val added = current.none { it.id == film.id }
         val updated = if (added) listOf(film) + current else current.filterNot { it.id == film.id }
- 
+
         store.saveWatchlist(updated)
         _home.update { it.copy(watchlist = updated) }
         _detail.update { it.copy(message = if (added) "Added to My List." else "Removed from My List.") }
     }
- 
+
     // ── TorBox lookup & playback ──
- 
+
     fun findTorBoxMatches() = lookup(autoPlay = false, startMs = 0L)
- 
+
     fun playFilm(startPositionMs: Long) = lookup(autoPlay = true, startMs = startPositionMs)
- 
+
     private fun lookup(autoPlay: Boolean, startMs: Long) {
         val film = _detail.value.film ?: return
- 
+
         viewModelScope.launch {
             _detail.update {
                 it.copy(isLoading = true, matches = emptyList(), message = "Searching your TorBox library...")
             }
- 
+
             loadLibraryInternal().fold(
                 onSuccess = { files ->
                     val name = normalizeTitle(film.name)
                     val matches = if (name.isBlank()) emptyList()
                     else files.filter { normalizeTitle(it.name).contains(name) }
- 
+
                     when {
                         matches.isEmpty() -> _detail.update {
                             it.copy(isLoading = false, message = "This title was not found in your TorBox library.")
                         }
- 
+
                         autoPlay && matches.size == 1 -> {
                             _detail.update { it.copy(isLoading = false, message = "") }
                             startTorBoxPlayback(matches.first(), film.backdrop.ifBlank { film.poster }, startMs)
                         }
- 
+
                         else -> _detail.update {
                             it.copy(isLoading = false, matches = matches, message = "Choose a file below.")
                         }
@@ -604,7 +604,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
             )
         }
     }
- 
+
     fun playTorBoxFile(file: TbFile, startPositionMs: Long) {
         val film = _detail.value.film
         startTorBoxPlayback(
@@ -613,7 +613,7 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
             startPositionMs = startPositionMs
         )
     }
- 
+
     private fun startTorBoxPlayback(file: TbFile, image: String, startPositionMs: Long) {
         _playRequest.value = PlayRequest(
             name = file.name,
@@ -624,15 +624,15 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
             startPositionMs = startPositionMs
         )
     }
- 
+
     fun playDirectLink() {
         val link = _settings.value.directLink.trim()
- 
+
         if (!link.startsWith("http://", true) && !link.startsWith("https://", true)) {
             _settings.update { it.copy(torboxStatus = "Enter a valid http or https stream link.") }
             return
         }
- 
+
         _playRequest.value = PlayRequest(
             name = link.substringAfterLast('/').substringBefore('?').ifBlank { "Stream" },
             image = "",
@@ -642,18 +642,18 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
             startPositionMs = 0L
         )
     }
- 
+
     fun closePlayer() {
         _playRequest.value = null
     }
- 
+
     fun saveProgress(request: PlayRequest, positionMs: Long, durationMs: Long) {
         if (positionMs < 3_000L) return
- 
+
         val duration = durationMs.coerceAtLeast(0L)
         val finished = duration > 0L && positionMs > duration * 0.95
         val rest = _home.value.resume.filterNot { it.key == request.key }
- 
+
         val updated = if (finished) rest else (
             listOf(
                 Resume(
@@ -667,11 +667,11 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
                 )
             ) + rest
             ).take(10)
- 
+
         store.saveResume(updated)
         _home.update { it.copy(resume = updated) }
     }
- 
+
     fun resumeFromHome(resume: Resume) {
         _playRequest.value = PlayRequest(
             name = resume.name,
@@ -682,35 +682,35 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
             startPositionMs = resume.positionMs
         )
     }
- 
+
     // ── Settings ──
- 
+
     fun onTorboxKeyChange(value: String) {
         val trimmed = value.trim()
         _settings.update { it.copy(torboxKey = trimmed, torboxStatus = "") }
         store.saveTorboxKey(trimmed)
     }
- 
+
     fun onTmdbKeyChange(value: String) {
         val trimmed = value.trim()
         _settings.update { it.copy(tmdbKey = trimmed) }
         store.saveTmdbKey(trimmed)
     }
- 
+
     fun onDirectLinkChange(value: String) {
         _settings.update { it.copy(directLink = value) }
     }
- 
+
     fun testTorboxConnection() {
         val apiKey = _settings.value.torboxKey
- 
+
         if (apiKey.isBlank()) {
             _settings.update { it.copy(torboxStatus = "Enter your TorBox API key first.") }
             return
         }
- 
+
         _settings.update { it.copy(torboxStatus = "Testing TorBox connection...") }
- 
+
         viewModelScope.launch {
             TorBoxRepository.testConnection(apiKey)
                 .onSuccess { ok ->
@@ -725,18 +725,18 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
                 }
         }
     }
- 
+
     // ── Internals ──
- 
+
     private suspend fun loadLibraryInternal(): Result<List<TbFile>> {
         val apiKey = _settings.value.torboxKey
- 
+
         if (apiKey.isBlank()) {
             return Result.failure(IllegalStateException("Add your TorBox API key in Settings."))
         }
- 
+
         _library.update { it.copy(isLoading = true, status = "") }
- 
+
         return TorBoxRepository.loadLibrary(apiKey)
             .onSuccess { files ->
                 _library.update {
@@ -753,31 +753,31 @@ internal class AppViewModel(private val store: AppStorage) : ViewModel() {
                 }
             }
     }
- 
+
     private fun readableError(error: Throwable, fallback: String): String = when (error) {
         is Http.HttpException -> "$fallback (HTTP ${error.statusCode})"
         is IllegalStateException -> error.message ?: fallback
         else -> fallback
     }
 }
- 
+
 // ───────────────────────────── Activity ─────────────────────────────
- 
+
 class MainActivity : ComponentActivity() {
- 
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
- 
+
         window.statusBarColor = android.graphics.Color.rgb(11, 11, 16)
         window.navigationBarColor = android.graphics.Color.rgb(11, 11, 16)
- 
+
         setContent {
             val context = LocalContext.current
             val storage = remember {
                 AppStorage(context.getSharedPreferences("cinestream", Context.MODE_PRIVATE))
             }
             val viewModel: AppViewModel = viewModel { AppViewModel(storage) }
- 
+
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     background = NetBlack,
@@ -792,22 +792,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
- 
+
 @Composable
 private fun CineStreamApp(viewModel: AppViewModel) {
     val context = LocalContext.current
- 
+
     val home by viewModel.home.collectAsState()
     val search by viewModel.search.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val detail by viewModel.detail.collectAsState()
     val playRequest by viewModel.playRequest.collectAsState()
- 
+
     var selectedScreen by remember { mutableStateOf("Home") }
     var lastBackPressMs by remember { mutableStateOf(0L) }
- 
+
     LaunchedEffect(settings.tmdbKey) { viewModel.loadCatalog() }
- 
+
     BackHandler(enabled = true) {
         when {
             playRequest != null -> viewModel.closePlayer()
@@ -824,11 +824,11 @@ private fun CineStreamApp(viewModel: AppViewModel) {
             }
         }
     }
- 
+
     Box(Modifier.fillMaxSize().background(NetBlack)) {
         val activeRequest = playRequest
         val activeFilm = detail.film
- 
+
         when {
             activeRequest != null -> PlayerScreen(
                 request = activeRequest,
@@ -837,7 +837,7 @@ private fun CineStreamApp(viewModel: AppViewModel) {
                     viewModel.saveProgress(activeRequest, position, duration)
                 }
             )
- 
+
             activeFilm != null -> DetailsScreen(
                 state = detail,
                 isInWatchlist = home.watchlist.any { it.id == activeFilm.id },
@@ -846,31 +846,31 @@ private fun CineStreamApp(viewModel: AppViewModel) {
                 onPickFile = viewModel::playTorBoxFile,
                 onToggleWatchlist = { viewModel.toggleWatchlist(activeFilm) }
             )
- 
+
             else -> Column(Modifier.fillMaxSize()) {
                 TopNavigationBar(selectedScreen) { selectedScreen = it }
- 
+
                 when (selectedScreen) {
                     "Home" -> HomeScreen(home, viewModel::openDetails, viewModel::resumeFromHome)
- 
+
                     "Shows" -> FilteredCatalogScreen(
                         "TV Shows", home.catalog.filter { it.kind == "Series" },
                         onOpen = viewModel::openDetails
                     )
- 
+
                     "Movies" -> FilteredCatalogScreen(
                         "Movies", home.catalog.filter { it.kind == "Movie" },
                         onOpen = viewModel::openDetails
                     )
- 
+
                     "My List" -> FilteredCatalogScreen(
                         "My Watchlist", home.watchlist,
                         emptyMessage = "Your watchlist is empty.",
                         onOpen = viewModel::openDetails
                     )
- 
+
                     "Search" -> SearchScreen(search, viewModel::onSearchQueryChange, viewModel::openDetails)
- 
+
                     "Settings" -> SettingsScreen(
                         state = settings,
                         onTorboxKeyChange = viewModel::onTorboxKeyChange,
@@ -884,9 +884,9 @@ private fun CineStreamApp(viewModel: AppViewModel) {
         }
     }
 }
- 
+
 // ───────────────────────────── Reusable UI ─────────────────────────────
- 
+
 @Composable
 private fun Label(
     text: String,
@@ -909,7 +909,7 @@ private fun Label(
         overflow = TextOverflow.Ellipsis
     )
 }
- 
+
 /** One focus/click wrapper used by every card, pill and button (TV remote friendly). */
 @Composable
 private fun Focusable(
@@ -925,7 +925,7 @@ private fun Focusable(
 ) {
     var focused by remember { mutableStateOf(false) }
     val animatedScale by animateFloatAsState(if (focused) scale else 1f, label = "focus-scale")
- 
+
     Box(
         modifier = modifier
             .onFocusChanged {
@@ -941,7 +941,7 @@ private fun Focusable(
         content(this, focused)
     }
 }
- 
+
 @Composable
 private fun TopNavigationBar(current: String, onSelect: (String) -> Unit) {
     Box(
@@ -959,7 +959,7 @@ private fun TopNavigationBar(current: String, onSelect: (String) -> Unit) {
         ) {
             Screens.forEach { screen ->
                 val selected = current == screen
- 
+
                 Focusable(
                     shape = RoundedCornerShape(50.dp),
                     scale = 1.05f,
@@ -979,7 +979,7 @@ private fun TopNavigationBar(current: String, onSelect: (String) -> Unit) {
         }
     }
 }
- 
+
 @Composable
 private fun PosterCard(film: Film, onFocus: (Boolean) -> Unit = {}, onClick: () -> Unit) {
     Focusable(
@@ -993,7 +993,7 @@ private fun PosterCard(film: Film, onFocus: (Boolean) -> Unit = {}, onClick: () 
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
- 
+
         if (film.rating.isNotBlank()) {
             Box(
                 modifier = Modifier
@@ -1007,13 +1007,13 @@ private fun PosterCard(film: Film, onFocus: (Boolean) -> Unit = {}, onClick: () 
         }
     }
 }
- 
+
 @Composable
 private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
     val progress = if (resume.durationMs > 0L) {
         (resume.positionMs.toFloat() / resume.durationMs).coerceIn(0f, 1f)
     } else 0f
- 
+
     val minutesLeft = ((resume.durationMs - resume.positionMs) / 60_000L).coerceAtLeast(0L).toInt()
     val remaining = when {
         resume.durationMs <= 0L -> "Continue watching"
@@ -1021,7 +1021,7 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
         minutesLeft > 0 -> "$minutesLeft min left"
         else -> "Almost finished"
     }
- 
+
     Focusable(modifier = Modifier.width(300.dp).height(180.dp), onClick = onClick) {
         if (resume.image.isNotBlank()) {
             AsyncImage(
@@ -1031,20 +1031,20 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
                 contentScale = ContentScale.Crop
             )
         }
- 
+
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(listOf(Color.Transparent, Color(0x55000000), Color(0xEE000000)))
             )
         )
- 
+
         Column(
             modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Label(resume.name, 14, NetWhite, FontWeight.Bold, maxLines = 1)
             Label(remaining, 11, Color(0xFFDDDDDD), maxLines = 1)
- 
+
             Box(
                 Modifier.fillMaxWidth().height(4.dp)
                     .clip(RoundedCornerShape(4.dp)).background(Color(0xFF55555F))
@@ -1054,7 +1054,7 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
         }
     }
 }
- 
+
 @Composable
 private fun Shelf(
     title: String,
@@ -1064,10 +1064,10 @@ private fun Shelf(
     ranked: Boolean = false
 ) {
     if (films.isEmpty()) return
- 
+
     Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
         Label(title, 20, NetWhite, FontWeight.Bold, Modifier.padding(start = 48.dp, bottom = 10.dp))
- 
+
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
             horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -1080,7 +1080,7 @@ private fun Shelf(
                             Modifier.padding(end = 6.dp), maxLines = 1
                         )
                     }
- 
+
                     PosterCard(
                         film = film,
                         onFocus = { if (it) onFocus(film) },
@@ -1091,7 +1091,7 @@ private fun Shelf(
         }
     }
 }
- 
+
 @Composable
 private fun LoadingState(message: String = "Loading...") {
     Column(
@@ -1103,14 +1103,14 @@ private fun LoadingState(message: String = "Loading...") {
         Label(message, 14, NetMuted)
     }
 }
- 
+
 @Composable
 private fun MessageState(message: String) {
     Box(Modifier.fillMaxWidth().padding(horizontal = 48.dp, vertical = 48.dp), Alignment.Center) {
         Label(message, 16, NetWhite, align = TextAlign.Center)
     }
 }
- 
+
 @Composable
 private fun ActionButton(
     label: String,
@@ -1140,7 +1140,7 @@ private fun ActionButton(
                     .height(4.dp).background(NetRed)
             )
         }
- 
+
         Label(
             text = label,
             size = 15,
@@ -1150,9 +1150,9 @@ private fun ActionButton(
         )
     }
 }
- 
+
 // ───────────────────────────── Screens ─────────────────────────────
- 
+
 @Composable
 private fun HomeScreen(
     state: HomeUiState,
@@ -1161,17 +1161,17 @@ private fun HomeScreen(
 ) {
     when {
         state.isLoadingCatalog && state.catalog.isEmpty() -> LoadingState("Loading today’s catalog...")
- 
+
         state.catalog.isEmpty() -> MessageState(state.catalogError.ifBlank { "No titles available yet." })
- 
+
         else -> {
             var heroId by remember { mutableStateOf(state.catalog.first().id) }
             val hero = state.catalog.firstOrNull { it.id == heroId } ?: state.catalog.first()
             val onFocus = { film: Film -> heroId = film.id }
- 
+
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 32.dp)) {
                 item(key = "hero") { HeroBanner(hero) { onOpen(hero) } }
- 
+
                 if (state.resume.isNotEmpty()) {
                     item(key = "continue") {
                         Column(Modifier.fillMaxWidth().padding(vertical = 10.dp)) {
@@ -1179,7 +1179,7 @@ private fun HomeScreen(
                                 "Continue Watching", 20, NetWhite, FontWeight.Bold,
                                 Modifier.padding(start = 48.dp, bottom = 10.dp)
                             )
- 
+
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 48.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -1191,11 +1191,11 @@ private fun HomeScreen(
                         }
                     }
                 }
- 
+
                 item(key = "trending") {
                     Shelf("Top 10 Trending Today", state.catalog.take(10), onOpen, onFocus, ranked = true)
                 }
- 
+
                 items(Providers, key = { it }) { provider ->
                     Shelf(provider, state.catalog.filter { it.provider == provider }, onOpen, onFocus)
                 }
@@ -1203,7 +1203,7 @@ private fun HomeScreen(
         }
     }
 }
- 
+
 @Composable
 private fun HeroBanner(film: Film, onOpen: () -> Unit) {
     Box(
@@ -1219,7 +1219,7 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
                 )
             }
         }
- 
+
         Box(
             Modifier.fillMaxSize().background(
                 Brush.verticalGradient(listOf(Color.Transparent, NetBlack), startY = 250f)
@@ -1230,7 +1230,7 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
                 Brush.horizontalGradient(listOf(NetBlack.copy(alpha = 0.92f), Color.Transparent), endX = 700f)
             )
         )
- 
+
         Column(
             modifier = Modifier.align(Alignment.BottomStart)
                 .padding(start = 48.dp, bottom = 40.dp).width(650.dp),
@@ -1242,21 +1242,21 @@ private fun HeroBanner(film: Film, onOpen: () -> Unit) {
                     Label(film.provider, 11, NetWhite, FontWeight.Bold)
                 }
             }
- 
+
             Label(film.name, 44, NetWhite, FontWeight.Black, maxLines = 1)
- 
+
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (film.rating.isNotBlank()) Label("★ ${film.rating}", 13, NetGreen, FontWeight.Bold)
                 Label(film.year, 13, NetMuted)
                 Label("•", 13, NetMuted)
                 Label(film.kind, 13, NetMuted)
             }
- 
+
             Label(film.overview, 14, NetWhite.copy(alpha = 0.9f), maxLines = 2)
         }
     }
 }
- 
+
 @Composable
 private fun FilteredCatalogScreen(
     title: String,
@@ -1268,16 +1268,16 @@ private fun FilteredCatalogScreen(
         MessageState(emptyMessage)
         return
     }
- 
+
     LazyColumn(Modifier.fillMaxSize().padding(vertical = 8.dp), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { Label(title, 26, NetWhite, FontWeight.Bold, Modifier.padding(start = 48.dp, bottom = 12.dp)) }
- 
+
         items(Providers, key = { it }) { provider ->
             Shelf(provider, films.filter { it.provider == provider }, onOpen)
         }
     }
 }
- 
+
 @Composable
 private fun SearchScreen(
     state: SearchUiState,
@@ -1301,7 +1301,7 @@ private fun SearchScreen(
             ),
             modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
         )
- 
+
         when {
             state.isSearching -> LoadingState("Searching...")
             state.error.isNotBlank() -> MessageState(state.error)
@@ -1321,7 +1321,7 @@ private fun SearchScreen(
         }
     }
 }
- 
+
 @Composable
 private fun DetailsScreen(
     state: DetailUiState,
@@ -1332,12 +1332,12 @@ private fun DetailsScreen(
     onToggleWatchlist: () -> Unit
 ) {
     val film = state.film ?: return
- 
+
     val hasProgress = state.resumePositionMs > 5_000L && state.resumeDurationMs > 0L
     val progress = if (hasProgress) {
         (state.resumePositionMs.toFloat() / state.resumeDurationMs).coerceIn(0f, 1f)
     } else 0f
- 
+
     Box(Modifier.fillMaxSize().background(NetBlack)) {
         if (film.backdrop.isNotBlank()) {
             AsyncImage(
@@ -1347,13 +1347,13 @@ private fun DetailsScreen(
                 contentScale = ContentScale.Crop
             )
         }
- 
+
         Box(
             Modifier.fillMaxSize().background(
                 Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.92f), NetBlack.copy(alpha = 0.35f)))
             )
         )
- 
+
         Column(
             modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .padding(horizontal = 56.dp, vertical = 48.dp),
@@ -1365,19 +1365,19 @@ private fun DetailsScreen(
                     Label(film.provider, 12, NetWhite, FontWeight.Bold)
                 }
             }
- 
+
             Label(film.name, 42, NetWhite, FontWeight.Black)
- 
+
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (film.rating.isNotBlank()) Label("★ ${film.rating}", 15, NetGreen, FontWeight.Bold)
                 Label(film.year, 15, NetWhite, FontWeight.Medium)
                 Label(film.kind, 15, NetMuted)
             }
- 
+
             Label(film.overview, 15, NetWhite, modifier = Modifier.width(600.dp), maxLines = 4)
- 
+
             Spacer(Modifier.height(4.dp))
- 
+
             ActionButton(
                 label = when {
                     state.isLoading -> "Loading..."
@@ -1389,24 +1389,24 @@ private fun DetailsScreen(
                 progress = progress,
                 onClick = { onPlay(state.resumePositionMs) }
             )
- 
+
             ActionButton(
                 label = if (film.kind == "Series") "Episodes" else "Find in TorBox",
                 onClick = onFindFiles
             )
- 
+
             ActionButton(
                 label = if (isInWatchlist) "✓  Added to My List" else "+  Add to My List",
                 onClick = onToggleWatchlist
             )
- 
+
             if (state.message.isNotBlank()) {
                 Label(state.message, 14, NetMuted, modifier = Modifier.padding(top = 4.dp))
             }
- 
+
             if (state.matches.isNotEmpty()) {
                 Label("Select a file from TorBox", 18, NetWhite, FontWeight.Bold, Modifier.padding(top = 8.dp))
- 
+
                 state.matches.forEach { file ->
                     Focusable(
                         modifier = Modifier.fillMaxWidth(),
@@ -1420,16 +1420,16 @@ private fun DetailsScreen(
                     }
                 }
             }
- 
+
             Spacer(Modifier.height(32.dp))
         }
     }
 }
- 
+
 @Composable
 private fun SettingsField(label: String, value: String, onChange: (String) -> Unit) {
     Label(label, 13, NetMuted, modifier = Modifier.padding(top = 8.dp))
- 
+
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
@@ -1446,7 +1446,7 @@ private fun SettingsField(label: String, value: String, onChange: (String) -> Un
         modifier = Modifier.fillMaxWidth()
     )
 }
- 
+
 @Composable
 private fun SettingsScreen(
     state: SettingsUiState,
@@ -1462,25 +1462,25 @@ private fun SettingsScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Label("App Settings", 26, NetWhite, FontWeight.Bold)
- 
+
         SettingsField("TorBox API Key", state.torboxKey, onTorboxKeyChange)
         ActionButton("Test TorBox Connection", onTestTorbox)
         if (state.torboxStatus.isNotBlank()) Label(state.torboxStatus, 14, NetWhite)
- 
+
         SettingsField("TMDB API Key", state.tmdbKey, onTmdbKeyChange)
- 
+
         SettingsField("Direct Stream Link", state.directLink, onDirectLinkChange)
         ActionButton("Play Link", onPlayDirectLink)
- 
+
         Label(
             "Made by Jamie", 16, JamieGold, FontWeight.Bold,
             Modifier.fillMaxWidth().padding(vertical = 32.dp), align = TextAlign.Center
         )
     }
 }
- 
+
 // ───────────────────────────── Player ─────────────────────────────
- 
+
 @Composable
 private fun PlayerScreen(
     request: PlayRequest,
@@ -1488,10 +1488,10 @@ private fun PlayerScreen(
     onProgress: (Long, Long) -> Unit
 ) {
     val context = LocalContext.current
- 
+
     var streamUrl by remember(request) { mutableStateOf(request.url) }
     var errorMessage by remember(request) { mutableStateOf("") }
- 
+
     LaunchedEffect(request, torboxKey) {
         if (streamUrl.isBlank() && request.torrentId >= 0) {
             TorBoxRepository.requestStreamLink(torboxKey, request.torrentId, request.fileId).fold(
@@ -1500,7 +1500,7 @@ private fun PlayerScreen(
             )
         }
     }
- 
+
     if (streamUrl.isBlank()) {
         Box(Modifier.fillMaxSize().background(Color.Black), Alignment.Center) {
             if (errorMessage.isBlank()) CircularProgressIndicator(color = NetRed)
@@ -1508,7 +1508,7 @@ private fun PlayerScreen(
         }
         return
     }
- 
+
     val exoPlayer = remember(streamUrl) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(streamUrl))
@@ -1517,7 +1517,7 @@ private fun PlayerScreen(
             playWhenReady = true
         }
     }
- 
+
     DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -1525,14 +1525,14 @@ private fun PlayerScreen(
             }
         }
         exoPlayer.addListener(listener)
- 
+
         onDispose {
             onProgress(exoPlayer.currentPosition, exoPlayer.duration.coerceAtLeast(0L))
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
     }
- 
+
     // Saves your spot every 10 seconds, so a crash or power-off never loses progress.
     LaunchedEffect(exoPlayer) {
         while (true) {
@@ -1542,7 +1542,7 @@ private fun PlayerScreen(
             }
         }
     }
- 
+
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             factory = { viewContext ->
@@ -1563,4 +1563,3 @@ private fun PlayerScreen(
         )
     }
 }
- 

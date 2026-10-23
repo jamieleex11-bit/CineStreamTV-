@@ -72,7 +72,7 @@ private val NetMuted = Color(0xFFA3A3A3)
 private val JamieGold = Color(0xFFFFD166)
 private val NetGreen = Color(0xFF46D369)
 
-private val Screens = listOf("Home", "Series", "Movies", "Search", "My List", "Settings")
+private val Screens = listOf("Home", "Series", "Movies", "My List", "Settings")
 
 // ───────────────────────────── Models ─────────────────────────────
 
@@ -1028,6 +1028,21 @@ private fun NetflixTopNavBar(current: String, onSelect: (String) -> Unit) {
                     }
                 }
             }
+        }
+
+        // Dedicated Search Button on right (Bubble pill fits without scrolling)
+        Surface(
+            shape = RoundedCornerShape(50.dp),
+            color = if (current == "Search") NetWhite else Color(0xFF222222),
+            modifier = Modifier.clickable { onSelect("Search") }
+        ) {
+            Text(
+                text = "🔍 Search",
+                color = if (current == "Search") Color.Black else NetWhite,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
         }
     }
 }

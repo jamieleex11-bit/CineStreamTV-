@@ -12,6 +12,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
@@ -84,8 +85,23 @@ data class Film(
     val poster: String,
     val backdrop: String,
     val overview: String,
-    val rating: String
+    val rating: String,
+    val network: String = "",
+    val badge: String = ""
 )
+
+fun Film.getEffectiveNetwork(): String {
+    if (network.isNotBlank()) return network
+    val lower = name.lowercase() + " " + overview.lowercase() + " " + badge.lowercase()
+    return when {
+        lower.contains("severance") || lower.contains("lasso") || lower.contains("silo") || lower.contains("flower moon") || lower.contains("apple") -> "Apple TV+"
+        lower.contains("mandalorian") || lower.contains("loki") || lower.contains("deadpool") || lower.contains("shōgun") || lower.contains("inside out") || lower.contains("disney") || lower.contains("marvel") || lower.contains("pixar") || lower.contains("star wars") -> "Disney+"
+        lower.contains("dune") || lower.contains("batman") || lower.contains("last of us") || lower.contains("thrones") || lower.contains("oppenheimer") || lower.contains("penguin") || lower.contains("hbo") || lower.contains("max") -> "Max"
+        lower.contains("boys") || lower.contains("fallout") || lower.contains("reacher") || lower.contains("prime") || lower.contains("amazon") -> "Prime Video"
+        lower.contains("interstellar") || lower.contains("top gun") || lower.contains("yellowstone") || lower.contains("paramount") -> "Paramount+"
+        else -> "Netflix"
+    }
+}
 
 data class Resume(
     val name: String,
@@ -982,17 +998,35 @@ private fun NetflixTopNavBar(current: String, onSelect: (String) -> Unit) {
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(24.dp)
+            horizontalArrangement = Arrangement.spacedBy(20.dp)
         ) {
             Text("NETFLIX", color = NetRed, fontSize = 28.sp, fontWeight = FontWeight.Black)
-            Screens.forEach { screen ->
-                Text(
-                    text = screen,
-                    color = if (current == screen) NetWhite else NetMuted,
-                    fontSize = 15.sp,
-                    fontWeight = if (current == screen) FontWeight.Bold else FontWeight.Medium,
-                    modifier = Modifier.clickable { onSelect(screen) }
-                )
+
+            // Category Bubble Pills Container (White bubble over active screen)
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(Color(0xFF222222))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Screens.forEach { screen ->
+                    val isSelected = current == screen
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50.dp))
+                            .background(if (isSelected) NetWhite else Color.Transparent)
+                            .clickable { onSelect(screen) }
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = screen,
+                            color = if (isSelected) Color.Black else NetMuted,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Medium
+                        )
+                    }
+                }
             }
         }
     }
@@ -1127,14 +1161,15 @@ private fun PosterCard(film: Film, onClick: () -> Unit) {
     val art = film.poster.ifBlank { film.backdrop }
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, label = "card_scale")
+    val network = film.getEffectiveNetwork()
 
     Box(
         modifier = Modifier
             .width(150.dp)
             .height(225.dp)
             .scale(scale)
-            .clip(RoundedCornerShape(6.dp))
-            .border(if (focused) 3.dp else 0.dp, NetWhite, RoundedCornerShape(6.dp))
+            .clip(RoundedCornerShape(8.dp))
+            .border(if (focused) 3.dp else 1.dp, if (focused) NetWhite else Color(0x22FFFFFF), RoundedCornerShape(8.dp))
             .background(NetDarkGray)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
@@ -1142,9 +1177,72 @@ private fun PosterCard(film: Film, onClick: () -> Unit) {
         if (art.isNotBlank()) {
             AsyncImage(model = art, contentDescription = film.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        if (film.rating.isNotBlank()) {
-            Box(Modifier.align(Alignment.BottomStart).padding(6.dp).background(Color(0xCC000000), RoundedCornerShape(4.dp)).padding(horizontal = 6.dp, vertical = 2.dp)) {
-                Text("★ " + film.rating, fontSize = 11.sp, color = NetGreen, fontWeight = FontWeight.Bold)
+
+        // Top-Left Platform Badge Pill (Apple TV+, Disney+, Max, Netflix, Prime, Paramount+)
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(6.dp)
+                .background(
+                    when (network) {
+                        "Disney+" -> Color(0xEE06122C)
+                        "Max" -> Color(0xEE13072B)
+                        "Prime Video" -> Color(0xEE00182E)
+                        "Paramount+" -> Color(0xEE00225A)
+                        "Apple TV+" -> Color(0xEE000000)
+                        else -> Color(0xEE141414)
+                    },
+                    RoundedCornerShape(4.dp)
+                )
+                .border(
+                    1.dp,
+                    when (network) {
+                        "Disney+" -> Color(0x8838BDF8)
+                        "Max" -> Color(0x88A855F7)
+                        "Prime Video" -> Color(0x8800A8E1)
+                        "Paramount+" -> Color(0x883B82F6)
+                        "Apple TV+" -> Color(0x88FFFFFF)
+                        else -> Color(0x88E50914)
+                    },
+                    RoundedCornerShape(4.dp)
+                )
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        ) {
+            Text(
+                text = when (network) {
+                    "Apple TV+" -> " tv+"
+                    "Disney+" -> "Disney+"
+                    "Max" -> "MAX"
+                    "Prime Video" -> "prime"
+                    "Paramount+" -> "P+"
+                    else -> "N"
+                },
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Black,
+                color = when (network) {
+                    "Prime Video" -> Color(0xFF38BDF8)
+                    "Netflix" -> NetRed
+                    else -> NetWhite
+                }
+            )
+        }
+
+        // Bottom Details
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE000000))))
+                .padding(6.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(film.name, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NetWhite, maxLines = 1)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (film.rating.isNotBlank()) {
+                        Text("★ " + film.rating, fontSize = 10.sp, color = NetGreen, fontWeight = FontWeight.Bold)
+                    }
+                    Text("• " + network, fontSize = 9.sp, color = NetMuted, maxLines = 1)
+                }
             }
         }
     }
@@ -1183,15 +1281,73 @@ private fun CatalogGridScreen(
     films: List<Film>,
     onOpen: (Film) -> Unit
 ) {
+    var selectedStudio by remember { mutableStateOf("ALL") }
+    val studios = listOf("ALL", "Apple TV+", "Disney+", "Max", "Netflix", "Prime Video", "Paramount+")
+
+    val filteredFilms = remember(films, selectedStudio) {
+        if (selectedStudio == "ALL") films
+        else films.filter { it.getEffectiveNetwork() == selectedStudio }
+    }
+
     Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 16.dp)) {
-        Text(title, fontSize = 26.sp, fontWeight = FontWeight.Bold, color = NetWhite, modifier = Modifier.padding(bottom = 16.dp))
-        if (films.isEmpty()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(title, fontSize = 28.sp, fontWeight = FontWeight.Black, color = NetWhite)
+                Text(
+                    text = "Streaming Hubs • " + (if (selectedStudio == "ALL") "All Studios" else selectedStudio) + " (" + filteredFilms.size + " titles)",
+                    fontSize = 13.sp,
+                    color = NetMuted
+                )
+            }
+        }
+
+        // Platform Brand Filter Bubble Pills (Active Solid White Bubble)
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(bottom = 16.dp)
+        ) {
+            items(studios) { studio ->
+                val isSelected = selectedStudio == studio
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (isSelected) NetWhite else Color(0xFF1F1F1F),
+                    border = BorderStroke(1.dp, if (isSelected) NetWhite else Color(0x33FFFFFF)),
+                    modifier = Modifier.clickable { selectedStudio = studio }
+                ) {
+                    Text(
+                        text = when (studio) {
+                            "ALL" -> "All Studios"
+                            "Apple TV+" -> " Apple TV+"
+                            "Disney+" -> "Disney+"
+                            "Max" -> "Max / HBO"
+                            "Prime Video" -> "Prime Video"
+                            "Paramount+" -> "Paramount+"
+                            else -> "Netflix Originals"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                        color = if (isSelected) Color.Black else NetWhite,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+
+        if (filteredFilms.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No titles in this section yet.", color = NetMuted, fontSize = 16.sp)
+                Text("No titles from " + selectedStudio + " yet.", color = NetMuted, fontSize = 16.sp)
             }
         } else {
-            LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                items(films, key = { it.id }) { film ->
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(150.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                items(filteredFilms, key = { it.id }) { film ->
                     PosterCard(film = film, onClick = { onOpen(film) })
                 }
             }
@@ -1351,47 +1507,233 @@ private fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 48.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 48.dp, vertical = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        Text("Settings", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = NetWhite)
+        // ── 1. Google TV Account & Profile Hero Card ──
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF14141F),
+            border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Brush.linearGradient(listOf(NetRed, Color(0xFFFF8C00)))),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("J", fontSize = 28.sp, fontWeight = FontWeight.Black, color = NetWhite)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("Jamie", fontSize = 22.sp, fontWeight = FontWeight.Black, color = NetWhite)
+                            Surface(shape = RoundedCornerShape(6.dp), color = Color(0x33FFD166)) {
+                                Text("GOOGLE TV 4K", fontSize = 9.sp, fontWeight = FontWeight.Black, color = JamieGold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                            }
+                        }
+                        Text("TorBox Debrid Cloud • TMDB Live Catalog • ExoPlayer 1.4.1", fontSize = 12.sp, color = NetMuted)
+                    }
+                }
 
-        Text("TorBox API Key", color = NetMuted, fontSize = 14.sp)
-        OutlinedTextField(
-            value = state.torboxKey,
-            onValueChange = onTorboxKeyChange,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = NetWhite, unfocusedTextColor = NetWhite, focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray)
-        )
-        Button(onClick = onTestTorbox, colors = ButtonDefaults.buttonColors(containerColor = NetWhite, contentColor = Color.Black)) {
-            Text("Test TorBox Connection")
+                Surface(shape = RoundedCornerShape(10.dp), color = Color(0x2200E676)) {
+                    Text("ONLINE • 4K HDR", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NetGreen, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp))
+                }
+            }
         }
-        if (state.torboxStatus.isNotBlank()) {
-            Text(state.torboxStatus, color = NetGreen, fontSize = 13.sp)
+
+        // ── 2. TorBox Debrid Cloud Integration Card ──
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF14141F),
+            border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0x2200E676)) {
+                            Text("☁", fontSize = 16.sp, modifier = Modifier.padding(6.dp))
+                        }
+                        Column {
+                            Text("TorBox Cloud Debrid Token", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NetWhite)
+                            Text("Stream cached torrents instantly without local downloading", fontSize = 11.sp, color = NetMuted)
+                        }
+                    }
+                    Surface(shape = RoundedCornerShape(6.dp), color = Color(0x2200E676)) {
+                        Text("v1 API", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = NetGreen, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                }
+
+                OutlinedTextField(
+                    value = state.torboxKey,
+                    onValueChange = onTorboxKeyChange,
+                    singleLine = true,
+                    placeholder = { Text("Paste TorBox token (tb_...)", color = NetMuted) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = NetWhite,
+                        unfocusedTextColor = NetWhite,
+                        focusedContainerColor = NetDarkGray,
+                        unfocusedContainerColor = NetDarkGray,
+                        focusedBorderColor = NetGreen,
+                        unfocusedBorderColor = Color(0x33FFFFFF)
+                    )
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(
+                        onClick = onTestTorbox,
+                        colors = ButtonDefaults.buttonColors(containerColor = NetWhite, contentColor = Color.Black),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Test TorBox Connection", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    }
+                    if (state.torboxStatus.isNotBlank()) {
+                        Text(state.torboxStatus, color = if (state.torboxStatus.contains("Connected")) NetGreen else NetRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
         }
 
-        Text("TMDB API Key", color = NetMuted, fontSize = 14.sp)
-        OutlinedTextField(
-            value = state.tmdbKey,
-            onValueChange = onTmdbKeyChange,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = NetWhite, unfocusedTextColor = NetWhite, focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray)
-        )
+        // ── 3. TMDB Metadata Catalog Card ──
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF14141F),
+            border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Surface(shape = RoundedCornerShape(8.dp), color = Color(0x2238BDF8)) {
+                            Text("🔑", fontSize = 16.sp, modifier = Modifier.padding(6.dp))
+                        }
+                        Column {
+                            Text("TMDB API Key / Bearer", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NetWhite)
+                            Text("Posters, backdrops, episode guides and rankings", fontSize = 11.sp, color = NetMuted)
+                        }
+                    }
+                    Surface(shape = RoundedCornerShape(6.dp), color = Color(0x2238BDF8)) {
+                        Text("v3/v4 API", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFF38BDF8), modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                }
 
-        Text("Direct Stream Link", color = NetMuted, fontSize = 14.sp)
-        OutlinedTextField(
-            value = state.directLink,
-            onValueChange = onDirectLinkChange,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = NetWhite, unfocusedTextColor = NetWhite, focusedContainerColor = NetDarkGray, unfocusedContainerColor = NetDarkGray)
-        )
-        Button(onClick = onPlayDirectLink, colors = ButtonDefaults.buttonColors(containerColor = NetWhite, contentColor = Color.Black)) {
-            Text("Play Stream Link")
+                OutlinedTextField(
+                    value = state.tmdbKey,
+                    onValueChange = onTmdbKeyChange,
+                    singleLine = true,
+                    placeholder = { Text("Paste TMDB API key or Bearer token", color = NetMuted) },
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = NetWhite,
+                        unfocusedTextColor = NetWhite,
+                        focusedContainerColor = NetDarkGray,
+                        unfocusedContainerColor = NetDarkGray,
+                        focusedBorderColor = Color(0xFF38BDF8),
+                        unfocusedBorderColor = Color(0x33FFFFFF)
+                    )
+                )
+            }
         }
 
-        Text("Made by Jamie", color = JamieGold, fontSize = 16.sp, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().padding(top = 32.dp), textAlign = TextAlign.Center)
+        // ── 4. Direct Stream Player & Test Presets Card ──
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color(0xFF14141F),
+            border = BorderStroke(1.dp, Color(0x22FFFFFF)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = RoundedCornerShape(8.dp), color = Color(0x22A855F7)) {
+                        Text("▶", fontSize = 16.sp, modifier = Modifier.padding(6.dp))
+                    }
+                    Column {
+                        Text("Direct Stream Link & Presets", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = NetWhite)
+                        Text("Play any external HTTP/HTTPS video URL (.m3u8 HLS, .mp4)", fontSize = 11.sp, color = NetMuted)
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = state.directLink,
+                        onValueChange = onDirectLinkChange,
+                        singleLine = true,
+                        placeholder = { Text("https://example.com/stream.m3u8", color = NetMuted) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = NetWhite,
+                            unfocusedTextColor = NetWhite,
+                            focusedContainerColor = NetDarkGray,
+                            unfocusedContainerColor = NetDarkGray,
+                            focusedBorderColor = Color(0xFFA855F7),
+                            unfocusedBorderColor = Color(0x33FFFFFF)
+                        )
+                    )
+                    Button(
+                        onClick = onPlayDirectLink,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7), contentColor = NetWhite),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Play Stream", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Text("One-Click Test Streams:", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NetMuted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            onDirectLinkChange("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4")
+                            onPlayDirectLink()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NetDarkGray, contentColor = NetWhite),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Sintel (4K)", fontSize = 11.sp)
+                    }
+                    Button(
+                        onClick = {
+                            onDirectLinkChange("https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4")
+                            onPlayDirectLink()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NetDarkGray, contentColor = NetWhite),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("Tears of Steel", fontSize = 11.sp)
+                    }
+                    Button(
+                        onClick = {
+                            onDirectLinkChange("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
+                            onPlayDirectLink()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = NetDarkGray, contentColor = NetWhite),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text("HLS Live Stream", fontSize = 11.sp)
+                    }
+                }
+            }
+        }
+
+        // ── 5. Signature Footer ──
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("♥ Made by Jamie", color = JamieGold, fontSize = 18.sp, fontWeight = FontWeight.Black)
+            Text("CineStream TV v2.0 • Google TV & Android TV Edition", color = NetMuted, fontSize = 12.sp)
+        }
     }
 }

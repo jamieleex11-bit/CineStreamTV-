@@ -1,26 +1,4 @@
 package com.example.cinestreamtv
-
-/*
- * CineStream TV - rewritten MainActivity.kt
- *
- * The layout/feature set is identical to the original file. What changed:
- *   1. progress is no longer wiped by ExoPlayer's buffering callback
- *   2. resume saves ignore durationMs == 0 (that killed the progress bar)
- *   3. resume lookup is exact-normalised, then >= 70% token overlap
- *   4. ONE debounce for the catalog (it used to debounce twice and race)
- *   5. MediaItem carries a MIME type so HLS/DASH actually play
- *   6. audio focus + pause-on-unplug + keep-screen-on
- *   7. TorBox library is paginated and skips unfinished torrents
- *   8. server error bodies are surfaced instead of a bare "HTTP 401"
- *   9. v3 key vs v4 bearer token is detected by shape, not by length
- *  10. the fake "streaming on <provider>" badge is gone
- *  11. the hero falls back to the poster when a backdrop is missing
- *  12. enableEdgeToEdge() + clip-then-border so the focus ring is visible
- *
- *  Remember: this file needs INTERNET permission, the media3 / coil /
- *  lifecycle-viewmodel-compose dependencies and buildFeatures { compose = true }.
- */
-
 import android.app.Activity
 import android.content.Context
 import android.content.SharedPreferences

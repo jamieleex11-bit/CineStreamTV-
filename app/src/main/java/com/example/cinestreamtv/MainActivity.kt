@@ -80,13 +80,13 @@ private val FrameCyan = Color(0xFF38BDF8)
 private val FramePurple = Color(0xFFA855F7)
 private val FrameGlass = Color(0x33FFFFFF)
 private val FrameBorder = Color(0x33FFFFFF)
-private val NetRed = Color(0xFFE50914)
+private val NetRed = Color(0xFFFFFFFF) // Apple TV pure white accent
 private val NetWhite = Color(0xFFFFFFFF)
 private val NetMuted = Color(0xFF9E9EB2)
 private val JamieGold = Color(0xFFFFD166)
-private val NetGreen = Color(0xFF46D369)
+private val NetGreen = Color(0xFF34D399)
 
-private val Screens = listOf("Home", "Series", "Movies", "My List", "Settings")
+private val Screens = listOf("Watch Now", "Channels", "TV Shows", "Movies", "Library", "Settings")
 
 // ───────────────────────────── Models ─────────────────────────────
 
@@ -862,9 +862,9 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
             )
 
             else -> Column(Modifier.fillMaxSize()) {
-                NetflixTopNavBar(selectedScreen) { selectedScreen = it }
+                FrameTopNavBar(selectedScreen) { selectedScreen = it }
                 when (selectedScreen) {
-                    "Home" -> NetflixHomeScreen(
+                    "Watch Now", "Home" -> NetflixHomeScreen(
                         state = home,
                         onOpen = viewModel::openDetails,
                         onResume = viewModel::resumeFromHome,
@@ -874,9 +874,10 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
                         },
                         onToggleWatchlist = viewModel::toggleWatchlist
                     )
-                    "Series" -> CatalogGridScreen("TV Series", home.catalog.filter { it.kind == "Series" }, viewModel::openDetails)
+                    "Channels" -> CatalogGridScreen("Studio Channels", home.catalog, viewModel::openDetails)
+                    "TV Shows", "Series" -> CatalogGridScreen("TV Series", home.catalog.filter { it.kind == "Series" }, viewModel::openDetails)
                     "Movies" -> CatalogGridScreen("Movies", home.catalog.filter { it.kind == "Movie" }, viewModel::openDetails)
-                    "My List" -> CatalogGridScreen("My List", home.watchlist, viewModel::openDetails)
+                    "Library", "My List" -> CatalogGridScreen("Library", home.watchlist, viewModel::openDetails)
                     "Search" -> SearchScreen(search, viewModel::onSearchQueryChange, viewModel::openDetails)
                     "Settings" -> SettingsScreen(
                         state = settings,
@@ -885,6 +886,16 @@ private fun CineStreamTvApp(viewModel: AppViewModel) {
                         onDirectLinkChange = viewModel::onDirectLinkChange,
                         onTestTorbox = viewModel::testTorboxConnection,
                         onPlayDirectLink = viewModel::playDirectLink
+                    )
+                    else -> NetflixHomeScreen(
+                        state = home,
+                        onOpen = viewModel::openDetails,
+                        onResume = viewModel::resumeFromHome,
+                        onPlayHero = { film ->
+                            viewModel.openDetails(film)
+                            viewModel.playFilm(0L)
+                        },
+                        onToggleWatchlist = viewModel::toggleWatchlist
                     )
                 }
             }
@@ -1228,32 +1239,25 @@ private fun HeroBanner(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(50.dp),
                     color = Color(0x33FFFFFF),
                     border = BorderStroke(1.dp, Color(0x44FFFFFF))
                 ) {
                     Text(
-                        text = "FRAME",
-                        color = FrameCyan,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Black,
+                        text = " tv+ ORIGINAL",
+                        color = NetWhite,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                 }
-                Text(
-                    text = (if (film.kind == "Series") "SERIES" else "CINEMA"),
-                    color = NetWhite,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp
-                )
                 Text("•", color = NetMuted, fontSize = 11.sp)
                 Text(
-                    text = "98% Resonance",
-                    color = FrameCyan,
+                    text = if (film.kind == "Series") "Apple Original Series" else "Feature Film",
+                    color = NetMuted,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Medium
                 )
             }
 
@@ -1492,29 +1496,22 @@ private fun Shelf(
         // High-performance LazyRow with stable keys and smooth spacing
         LazyRow(
             contentPadding = PaddingValues(horizontal = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             itemsIndexed(films, key = { _, f -> f.id }) { index, film ->
-                Row(verticalAlignment = Alignment.Bottom) {
-                    if (ranked) {
-                        Text(
-                            text = (index + 1).toString(),
-                            fontSize = 72.sp,
-                            fontWeight = FontWeight.Black,
-                            color = Color(0xFF444444),
-                            modifier = Modifier.padding(end = 4.dp)
-                        )
-                    }
-                    PosterCard(film = film, onClick = { onOpen(film) })
-                }
+                PosterCard(
+                    film = film,
+                    rank = if (ranked) index + 1 else null,
+                    onClick = { onOpen(film) }
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PosterCard(film: Film, onClick: () -> Unit) {
+private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
     val art = film.poster.ifBlank { film.backdrop }
     var focused by remember { mutableStateOf(false) }
     val network = film.getEffectiveNetwork()
@@ -1522,18 +1519,18 @@ private fun PosterCard(film: Film, onClick: () -> Unit) {
     // GPU-accelerated graphicsLayer scaling eliminates CPU layout invalidations on TV remotes!
     Box(
         modifier = Modifier
-            .width(156.dp)
-            .height(234.dp)
+            .width(160.dp)
+            .height(240.dp)
             .onFocusChanged { focused = it.isFocused }
             .graphicsLayer {
-                scaleX = if (focused) 1.06f else 1.0f
-                scaleY = if (focused) 1.06f else 1.0f
+                scaleX = if (focused) 1.07f else 1.0f
+                scaleY = if (focused) 1.07f else 1.0f
             }
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
             .border(
                 width = if (focused) 3.dp else 1.dp,
-                color = if (focused) NetWhite else Color(0x33FFFFFF),
-                shape = RoundedCornerShape(16.dp)
+                color = if (focused) NetWhite else Color(0x28FFFFFF),
+                shape = RoundedCornerShape(18.dp)
             )
             .background(NetDarkGray)
             .clickable(onClick = onClick)
@@ -1547,11 +1544,32 @@ private fun PosterCard(film: Film, onClick: () -> Unit) {
             )
         }
 
+        // Top-Right Minimalist Apple TV Rank Pill
+        if (rank != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(24.dp)
+                    .clip(RoundedCornerShape(50.dp))
+                    .background(NetWhite)
+                    .border(1.dp, Color(0x33000000), RoundedCornerShape(50.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = rank.toString(),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    color = Color.Black
+                )
+            }
+        }
+
         // Top-Left Platform Badge Pill (Apple TV+, Disney+, Max, Netflix, Prime, Paramount+)
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(6.dp)
+                .padding(8.dp)
                 .background(
                     when (network) {
                         "Disney+" -> Color(0xEE06122C)
@@ -1561,7 +1579,7 @@ private fun PosterCard(film: Film, onClick: () -> Unit) {
                         "Apple TV+" -> Color(0xEE000000)
                         else -> Color(0xEE141414)
                     },
-                    RoundedCornerShape(4.dp)
+                    RoundedCornerShape(8.dp)
                 )
                 .border(
                     1.dp,
@@ -1571,11 +1589,11 @@ private fun PosterCard(film: Film, onClick: () -> Unit) {
                         "Prime Video" -> Color(0x8800A8E1)
                         "Paramount+" -> Color(0x883B82F6)
                         "Apple TV+" -> Color(0x88FFFFFF)
-                        else -> Color(0x88E50914)
+                        else -> Color(0x55FFFFFF)
                     },
-                    RoundedCornerShape(4.dp)
+                    RoundedCornerShape(8.dp)
                 )
-                .padding(horizontal = 6.dp, vertical = 2.dp)
+                .padding(horizontal = 7.dp, vertical = 3.dp)
         ) {
             Text(
                 text = when (network) {
@@ -1631,11 +1649,11 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
                 scaleX = if (focused) 1.04f else 1.0f
                 scaleY = if (focused) 1.04f else 1.0f
             }
-            .clip(RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(16.dp))
             .border(
                 width = if (focused) 3.dp else 1.dp,
                 color = if (focused) NetWhite else Color(0x22FFFFFF),
-                shape = RoundedCornerShape(8.dp)
+                shape = RoundedCornerShape(16.dp)
             )
             .background(NetDarkGray)
             .clickable(onClick = onClick)
@@ -1645,11 +1663,11 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
         }
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))))
 
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(resume.name, fontSize = 13.sp, color = NetWhite, fontWeight = FontWeight.Bold, maxLines = 1)
             Text(remainingLabel(resume.positionMs, resume.durationMs), fontSize = 11.sp, color = NetMuted)
-            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Color(0xFF444444))) {
-                Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(NetRed))
+            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50.dp)).background(Color(0x33FFFFFF))) {
+                Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(NetWhite))
             }
         }
     }

@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.sp
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
@@ -128,7 +129,6 @@ enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
-// Sizes derived from the screen height so rows fit any TV
 class Sizes(val viewportH: Dp, val posterH: Dp, val posterW: Dp, val wideH: Dp, val wideW: Dp)
 
 fun sizesFor(maxH: Dp): Sizes {
@@ -389,7 +389,6 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
 
 // ======================= Smooth scrolling =======================
 
-// Horizontal rows: center item [index] in the row.
 suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 320) {
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
     if (item == null) {
@@ -472,7 +471,6 @@ fun PillButton(
 fun FrameTvApp() {
     val ctx = LocalContext.current
     val store = remember { Store(ctx) }
-    val scope = rememberCoroutineScope()
 
     var tab by remember { mutableStateOf(Tab.Home) }
     var tmdbKey by remember { mutableStateOf(store.get("tmdb")) }
@@ -493,7 +491,6 @@ fun FrameTvApp() {
         cw + rows
     }
 
-    // Back: close title page, then leave other tabs, then go to top row, then double-press to exit
     BackHandler {
         when {
             detail != null -> detail = null
@@ -511,7 +508,6 @@ fun FrameTvApp() {
         }
     }
 
-    // load TMDB rows whenever the key changes
     LaunchedEffect(tmdbKey) {
         if (tmdbKey.isBlank()) {
             status = "needkey"
@@ -528,7 +524,6 @@ fun FrameTvApp() {
         }
     }
 
-    // wait until focus settles before changing the hero
     LaunchedEffect(Unit) {
         snapshotFlow { heroTarget }.collectLatest { t ->
             if (hero == null) {
@@ -540,7 +535,6 @@ fun FrameTvApp() {
         }
     }
 
-    // glow color comes from the hero backdrop
     LaunchedEffect(hero?.key) {
         val u = img(hero?.backdrop ?: hero?.poster, "w1280")
         if (u != null) {
@@ -568,7 +562,6 @@ fun FrameTvApp() {
             .fillMaxSize()
             .background(base)
     ) {
-        // big backdrop behind everything
         Box(
             Modifier
                 .fillMaxSize()
@@ -611,7 +604,6 @@ fun FrameTvApp() {
             )
         }
 
-        // colored glow drawn in the draw phase
         Box(
             Modifier
                 .fillMaxSize()
@@ -686,7 +678,7 @@ fun TopNav(modifier: Modifier, current: Tab, onSelect: (Tab) -> Unit) {
             Box(
                 Modifier
                     .size(46.dp)
-                    .glass(RoundedCornerShape(14.dp), true),
+                    .glass(RoundedCornerShape(16.dp), true),
                 contentAlignment = Alignment.Center
             ) {
                 Text("F", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
@@ -807,7 +799,6 @@ fun HomeContent(
             label = "strip"
         )
 
-        // Hero text sits in the top area
         Column(
             Modifier
                 .align(Alignment.TopStart)
@@ -836,11 +827,11 @@ fun HomeContent(
                             Spacer(Modifier.width(12.dp))
                             Box(
                                 Modifier
-                                    .glass(RoundedCornerShape(8.dp), false)
+                                    .glass(RoundedCornerShape(10.dp), false)
                                     .padding(horizontal = 10.dp, vertical = 3.dp)
                             ) {
                                 Text(
-                                    "★ " + String.format("%.1f", h.rating),
+                                    "★ " + String.format(Locale.US, "%.1f", h.rating),
                                     color = Color.White,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold
@@ -858,7 +849,6 @@ fun HomeContent(
             }
         }
 
-        // Only the focused row is visible, centered in the lower part of the screen
         Box(
             Modifier
                 .align(Alignment.BottomStart)
@@ -948,7 +938,7 @@ fun StaticRow(row: RowData, sz: Sizes, onFocus: (Title) -> Unit, onOpen: (Title)
 fun PosterCard(t: Title, wide: Boolean, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.1f else 1f, tween(200), label = "card")
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(24.dp)
     val w = if (wide) sz.wideW else sz.posterW
     val h = if (wide) sz.wideH else sz.posterH
     val url = if (wide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w342")
@@ -1003,7 +993,7 @@ fun PosterCard(t: Title, wide: Boolean, sz: Sizes, onFocused: () -> Unit, onClic
     }
 }
 
-// ======================= Title page (Apple TV style) =======================
+// ======================= Title Page =======================
 
 @Composable
 fun DetailScreen(
@@ -1089,7 +1079,7 @@ fun DetailScreen(
                     if (t.rating > 0.0) {
                         Spacer(Modifier.width(14.dp))
                         Text(
-                            "★ " + String.format("%.1f", t.rating),
+                            "★ " + String.format(Locale.US, "%.1f", t.rating),
                             color = Color.White,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
@@ -1153,7 +1143,7 @@ fun DetailScreen(
 fun EpisodeCard(e: Episode, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(200), label = "ep")
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(22.dp)
     val url = img(e.still, "w300")
 
     Column(Modifier.width(300.dp).graphicsLayer { scaleX = scale; scaleY = scale }) {
@@ -1329,7 +1319,6 @@ fun SettingsScreen(store: Store, onSaved: (String) -> Unit) {
             .padding(start = 64.dp, end = 64.dp, top = 110.dp, bottom = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(28.dp)
     ) {
-        // sidebar
         Column(
             Modifier
                 .width(260.dp)
@@ -1349,7 +1338,6 @@ fun SettingsScreen(store: Store, onSaved: (String) -> Unit) {
             SettingsTab("About", section == 1) { section = 1 }
         }
 
-        // content panel
         Box(
             Modifier
                 .weight(1f)
@@ -1375,7 +1363,7 @@ fun SettingsTab(label: String, selected: Boolean, onSelect: () -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(24.dp))
             .background(bg)
             .onFocusChanged {
                 focused = it.isFocused
@@ -1465,14 +1453,13 @@ fun AboutPanel() {
     }
 }
 
-// Select once to type. Done or back closes the keyboard and returns to scrolling.
 @Composable
 fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     var editing by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     val focusReq = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(24.dp)
     val active = focused || editing
 
     BackHandler(enabled = editing) { editing = false }

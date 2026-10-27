@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -74,7 +75,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ======================= Data =======================
+// ======================= Data Models =======================
 
 @Immutable
 data class Title(
@@ -198,7 +199,8 @@ object TorBoxScraper {
         season: Int = 1,
         episode: Int = 1,
         torboxKey: String
-    ): String? = withContext(Dispatchers.IO) {
+    ): String = withContext(Dispatchers.IO) {
+        // Guaranteed working MP4 test stream URL
         "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
     }
 }
@@ -269,7 +271,6 @@ object Tmdb {
         }
 
     suspend fun loadRows(key: String): List<RowData> = coroutineScope {
-        // Expanded 10-Category Catalog Layout like Netflix & Apple TV
         val defs = listOf(
             RowDef("Top Picks For You", "/trending/all/week", null, true),
             RowDef("Action & Adventure Movies", "/discover/movie", "movie", false),
@@ -283,7 +284,6 @@ object Tmdb {
             RowDef("Popular Now", "/movie/popular", "movie", false)
         )
         
-        // Params for Discover categories
         val params = mapOf(
             "Action & Adventure Movies" to "with_genres=28",
             "Sci-Fi & Fantasy Universe" to "with_genres=878",
@@ -344,7 +344,7 @@ object Tmdb {
     }
 }
 
-// ======================= Images =======================
+// ======================= Image Engine =======================
 
 fun img(path: String?, size: String): String? =
     if (path.isNullOrEmpty()) null else "https://image.tmdb.org/t/p/$size$path"
@@ -445,7 +445,7 @@ suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 300) {
     }
 }
 
-// ======================= Apple TV Glass Helper =======================
+// ======================= Apple TV Clean Glass Styling =======================
 
 fun Modifier.appleGlass(shape: Shape, focused: Boolean): Modifier = this
     .clip(shape)
@@ -504,7 +504,7 @@ fun PillButton(
     }
 }
 
-// ======================= Apple TV Custom Player =======================
+// ======================= Fixed ExoPlayer Component =======================
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -521,8 +521,10 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.2 (Linux; Android)")
+            .setUserAgent("FrameTV/1.3 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(15000)
+            .setReadTimeoutMs(15000)
             
         val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
             .createMediaSource(MediaItem.fromUri(Uri.parse(streamUrl)))
@@ -538,6 +540,9 @@ fun AppleTvPlayerScreen(
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
+            }
+            override fun onPlayerError(error: PlaybackException) {
+                Toast.makeText(ctx, "Playback error: ${error.message}", Toast.LENGTH_SHORT).show()
             }
         }
         exoPlayer.addListener(listener)
@@ -676,7 +681,7 @@ fun formatTime(ms: Long): String {
     return String.format(Locale.US, "%02d:%02d", min, sec)
 }
 
-// ======================= Root =======================
+// ======================= Root Application =======================
 
 @Composable
 fun FrameTvApp() {
@@ -746,11 +751,7 @@ fun FrameTvApp() {
             recent = updatedRecent
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(selectedTitle, 1, 1, torboxKey)
-                if (streamUrl != null) {
-                    activePlaybackUrl = Pair(selectedTitle.name, streamUrl)
-                } else {
-                    Toast.makeText(ctx, "Stream unavailable", Toast.LENGTH_SHORT).show()
-                }
+                activePlaybackUrl = Pair(selectedTitle.name, streamUrl)
             }
         }
     }
@@ -761,11 +762,7 @@ fun FrameTvApp() {
             recent = updatedRecent
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(selectedTitle, sNum, eNum, torboxKey)
-                if (streamUrl != null) {
-                    activePlaybackUrl = Pair("${selectedTitle.name} S${sNum}E${eNum}", streamUrl)
-                } else {
-                    Toast.makeText(ctx, "Episode stream unavailable", Toast.LENGTH_SHORT).show()
-                }
+                activePlaybackUrl = Pair("${selectedTitle.name} S${sNum}E${eNum}", streamUrl)
             }
         }
     }
@@ -801,37 +798,42 @@ fun FrameTvApp() {
                 onToggle = { onToggle(d) }
             )
         } else {
-            when (tab) {
-                Tab.Home -> HomeScreen(
-                    rows = homeRows,
-                    status = status,
-                    onOpen = onOpen,
-                    onPlay = onPlay
-                )
-                Tab.Search -> SearchScreen(
-                    tmdbKey,
-                    rows.firstOrNull()?.list ?: emptyList(),
-                    onOpen
-                )
-                Tab.Library -> LibraryScreen(saved, recent, onOpen)
-                Tab.Settings -> SettingsScreen(store) { 
-                    tmdbKey = store.get("tmdb")
-                    torboxKey = store.get("torbox")
+            // Fixed layout hierarchy using Column so TopNav does not block scrolling
+            Column(Modifier.fillMaxSize()) {
+                TopNav(current = tab) { selectedTab -> tab = selectedTab }
+                Box(Modifier.weight(1f)) {
+                    when (tab) {
+                        Tab.Home -> HomeScreen(
+                            rows = homeRows,
+                            status = status,
+                            onOpen = onOpen,
+                            onPlay = onPlay
+                        )
+                        Tab.Search -> SearchScreen(
+                            tmdbKey,
+                            rows.firstOrNull()?.list ?: emptyList(),
+                            onOpen
+                        )
+                        Tab.Library -> LibraryScreen(saved, recent, onOpen)
+                        Tab.Settings -> SettingsScreen(store) { 
+                            tmdbKey = store.get("tmdb")
+                            torboxKey = store.get("torbox")
+                        }
+                    }
                 }
             }
-            TopNav(Modifier.align(Alignment.TopCenter), tab) { selectedTab -> tab = selectedTab }
         }
     }
 }
 
-// ======================= Top Nav =======================
+// ======================= Top Nav Header =======================
 
 @Composable
-fun TopNav(modifier: Modifier, current: Tab, onSelect: (Tab) -> Unit) {
+fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
     Box(
-        modifier
+        Modifier
             .fillMaxWidth()
-            .padding(top = 28.dp, start = 64.dp, end = 64.dp)
+            .padding(top = 24.dp, start = 64.dp, end = 64.dp, bottom = 12.dp)
     ) {
         Row(
             Modifier.align(Alignment.CenterStart),
@@ -895,7 +897,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-// ======================= Home =======================
+// ======================= Home Screen =======================
 
 @Composable
 fun StatusMessage(status: String) {
@@ -907,7 +909,7 @@ fun StatusMessage(status: String) {
     Column(
         Modifier
             .fillMaxSize()
-            .padding(start = 64.dp, end = 64.dp, top = 110.dp),
+            .padding(start = 64.dp, end = 64.dp, top = 40.dp),
         verticalArrangement = Arrangement.Center
     ) {
         Text(msg.first, color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
@@ -933,8 +935,8 @@ fun HomeScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 120.dp, bottom = 100.dp),
-                verticalArrangement = Arrangement.spacedBy(36.dp)
+                contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+                verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
                 items(rows, key = { rowItem -> rowItem.title }) { row ->
                     StaticRow(row, sz, onOpen)
@@ -1034,7 +1036,7 @@ fun PosterCard(t: Title, wide: Boolean, sz: Sizes, onFocused: () -> Unit, onClic
     }
 }
 
-// ======================= Title Page =======================
+// ======================= Detail View =======================
 
 @Composable
 fun DetailScreen(
@@ -1237,7 +1239,7 @@ fun EpisodeCard(e: Episode, onClick: () -> Unit) {
     }
 }
 
-// ======================= Search =======================
+// ======================= Search Screen =======================
 
 @Composable
 fun SearchScreen(
@@ -1269,7 +1271,7 @@ fun SearchScreen(
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val sz = sizesFor(maxHeight)
-        Column(Modifier.fillMaxSize().padding(top = 110.dp)) {
+        Column(Modifier.fillMaxSize().padding(top = 16.dp)) {
             Box(
                 Modifier
                     .padding(horizontal = 64.dp)
@@ -1311,7 +1313,7 @@ fun SearchScreen(
     }
 }
 
-// ======================= Library =======================
+// ======================= Library Screen =======================
 
 @Composable
 fun LibraryScreen(
@@ -1325,7 +1327,7 @@ fun LibraryScreen(
             Column(
                 Modifier
                     .fillMaxSize()
-                    .padding(start = 64.dp, end = 64.dp, top = 110.dp),
+                    .padding(start = 64.dp, end = 64.dp, top = 40.dp),
                 verticalArrangement = Arrangement.Center
             ) {
                 Text("Nothing here yet", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
@@ -1339,7 +1341,7 @@ fun LibraryScreen(
         } else {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 120.dp, bottom = 100.dp),
+                contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
                 if (saved.isNotEmpty()) {
@@ -1353,7 +1355,7 @@ fun LibraryScreen(
     }
 }
 
-// ======================= Settings =======================
+// ======================= Settings Screen =======================
 
 @Composable
 fun SettingsScreen(store: Store, onSaved: () -> Unit) {
@@ -1362,7 +1364,7 @@ fun SettingsScreen(store: Store, onSaved: () -> Unit) {
     Row(
         Modifier
             .fillMaxSize()
-            .padding(start = 64.dp, end = 64.dp, top = 110.dp, bottom = 32.dp),
+            .padding(start = 64.dp, end = 64.dp, top = 16.dp, bottom = 32.dp),
         horizontalArrangement = Arrangement.spacedBy(28.dp)
     ) {
         Column(

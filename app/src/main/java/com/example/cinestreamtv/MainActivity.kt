@@ -562,8 +562,8 @@ fun FrameTvApp() {
         { t: Title -> detail = t }
     }
 
-    val onPlay = remember {
-        { t: Title ->
+    val onPlay: (Title) -> Unit = remember {
+        { t ->
             recent = store.addRecent(t)
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(t, 1, 1, torboxKey)
@@ -573,11 +573,12 @@ fun FrameTvApp() {
                     Toast.makeText(ctx, "Playback started via TorBox cache", Toast.LENGTH_SHORT).show()
                 }
             }
+            Unit
         }
     }
 
-    val onToggle = remember {
-        { t: Title ->
+    val onToggle: (Title) -> Unit = remember {
+        { t ->
             saved = store.toggleSaved(t)
         }
     }

@@ -144,11 +144,12 @@ enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
-class Sizes(val posterH: Dp, val posterW: Dp)
+class Sizes(val posterH: Dp, val posterW: Dp, val cwH: Dp, val cwW: Dp)
 
 fun sizesFor(maxH: Dp): Sizes {
-    val ph = (maxH * 0.44f - 30.dp)
-    return Sizes(ph, ph * 0.67f)
+    val ph = maxH * 0.38f
+    val cwH = maxH * 0.28f
+    return Sizes(ph, ph * 0.67f, cwH, cwH * 1.77f)
 }
 
 // ======================= Storage =======================
@@ -188,7 +189,7 @@ class Store(ctx: Context) {
 
     fun updateProgress(t: Title, currentPosMs: Long, totalDurationMs: Long) {
         if (totalDurationMs <= 0L) return
-        val pct = (currentPosMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
+        val pct = (currentPosMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0.05f, 0.98f)
         val updated = t.copy(progress = pct, savedPosMs = currentPosMs)
         val l = (listOf(updated) + recent().filter { it.key != t.key }).take(15)
         writeList("recent", l)
@@ -241,10 +242,9 @@ object TorBoxScraper {
                     }
                 }
             } catch (e: Exception) {
-                // Fallback to sample stream if offline/invalid query
+                // Fallback stream on connection error
             }
         }
-        // Universal backup stream URL
         "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
     }
 }
@@ -291,7 +291,7 @@ object Tmdb {
             val name = o.str("title") ?: o.str("name") ?: continue
             val poster = o.str("poster_path")
             val backdrop = o.str("backdrop_path")
-            if (poster == null) continue // Require poster for uniform card layouts
+            if (poster == null) continue
             val date = o.str("release_date") ?: o.str("first_air_date") ?: ""
             out.add(
                 Title(
@@ -567,7 +567,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.4 (Linux; Android)")
+            .setUserAgent("FrameTV/1.5 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -758,11 +758,6 @@ fun FrameTvApp() {
         listOf(Color(0xFF1C2030), Color(0xFF0C0E14))
     )
 
-    val homeRows = remember(rows, recent) {
-        val cw = if (recent.isNotEmpty()) listOf(RowData("Continue Watching", recent)) else emptyList()
-        cw + rows
-    }
-
     BackHandler {
         when {
             activePlayback != null -> activePlayback = null
@@ -859,7 +854,8 @@ fun FrameTvApp() {
                 Box(Modifier.weight(1f)) {
                     when (tab) {
                         Tab.Home -> HomeScreen(
-                            rows = homeRows,
+                            recentList = recent,
+                            rows = rows,
                             status = status,
                             onOpen = onOpen,
                             onPlay = onPlay
@@ -975,6 +971,7 @@ fun StatusMessage(status: String) {
 
 @Composable
 fun HomeScreen(
+    recentList: List<Title>,
     rows: List<RowData>,
     status: String,
     onOpen: (Title) -> Unit,
@@ -993,18 +990,114 @@ fun HomeScreen(
                 contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
+                // Official Apple TV Horizontal 16:9 "Continue Watching" Shelf
+                if (recentList.isNotEmpty()) {
+                    item(key = "continue_watching_shelf") {
+                        ContinueWatchingRow(recentList, sz, onOpen)
+                    }
+                }
+                // Standard Catalog Rows
                 items(rows, key = { rowItem -> rowItem.title }) { row ->
-                    StaticRow(row, sz, onOpen)
+                    CatalogRow(row, sz, onOpen)
                 }
             }
         }
     }
 }
 
-// ======================= Rows & Uniform Posters =======================
+// ======================= Apple TV Horizontal Continue Watching Shelf =======================
 
 @Composable
-fun StaticRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
+fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
+    val rowState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.height(36.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
+            Text("Continue Watching", color = Color.White.copy(alpha = 0.95f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(12.dp))
+        LazyRow(
+            state = rowState,
+            contentPadding = PaddingValues(horizontal = 64.dp),
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            itemsIndexed(list, key = { _, titleItem -> "cw-${titleItem.key}" }) { i, t ->
+                ContinueWatchingCard(
+                    t,
+                    sz,
+                    onFocused = { scope.launch { rowState.centerItem(i, 280) } },
+                    onClick = { onOpen(t) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun ContinueWatchingCard(t: Title, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(180), label = "cwScale")
+    val shape = RoundedCornerShape(18.dp)
+    val backdropUrl = img(t.backdrop ?: t.poster, "w780")
+    val ph = remember(t.id) { placeholder(t.id) }
+
+    Column(Modifier.width(sz.cwW)) {
+        Box(
+            Modifier
+                .width(sz.cwW)
+                .height(sz.cwH)
+                .graphicsLayer { scaleX = scale; scaleY = scale }
+                .onFocusChanged { focusState ->
+                    focused = focusState.isFocused
+                    if (focusState.isFocused) onFocused()
+                }
+                .clip(shape)
+                .background(Brush.linearGradient(ph))
+                .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onClick
+                )
+        ) {
+            RemoteImage(backdropUrl, Modifier.fillMaxSize())
+
+            // Apple TV-style progress bar at card bottom
+            val progressVal = if (t.progress > 0f) t.progress else 0.15f
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.Black.copy(alpha = 0.5f))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progressVal)
+                        .fillMaxHeight()
+                        .background(Color.White)
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            t.name,
+            color = Color.White.copy(alpha = if (focused) 1f else 0.85f),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+// ======================= Standard Vertical Catalog Rows =======================
+
+@Composable
+fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
     val rowState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth()) {
@@ -1067,24 +1160,6 @@ fun PosterCard(t: Title, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) 
             )
         }
         RemoteImage(url, Modifier.fillMaxSize())
-        if (t.progress > 0f) {
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.White.copy(alpha = 0.3f))
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(t.progress)
-                        .fillMaxHeight()
-                        .background(Color.White)
-                )
-            }
-        }
     }
 }
 
@@ -1359,7 +1434,7 @@ fun SearchScreen(
                     fontSize = 17.sp,
                     modifier = Modifier.padding(start = 64.dp, top = 20.dp)
                 )
-                else -> StaticRow(rowData, sz, onOpen)
+                else -> CatalogRow(rowData, sz, onOpen)
             }
         }
     }
@@ -1397,10 +1472,10 @@ fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
                 if (saved.isNotEmpty()) {
-                    item(key = "saved") { StaticRow(RowData("My List", saved), sz, onOpen) }
+                    item(key = "saved") { CatalogRow(RowData("My List", saved), sz, onOpen) }
                 }
                 if (recent.isNotEmpty()) {
-                    item(key = "recent") { StaticRow(RowData("Recently Played", recent), sz, onOpen) }
+                    item(key = "recent") { ContinueWatchingRow(recent, sz, onOpen) }
                 }
             }
         }
@@ -1538,7 +1613,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.4", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.5", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

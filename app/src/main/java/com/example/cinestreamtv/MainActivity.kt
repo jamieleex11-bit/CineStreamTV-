@@ -1,7 +1,10 @@
 package com.example.cinestreamtv
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.util.LruCache
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
@@ -11,9 +14,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Text
@@ -21,12 +22,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -34,6 +38,12 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import kotlinx.coroutines.*
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -42,66 +52,272 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// ---------- Data ----------
+// ======================= Data =======================
 
+@Immutable
 data class Title(
+    val id: Int,
+    val type: String,
     val name: String,
-    val genre: String,
+    val overview: String,
     val year: String,
-    val desc: String,
-    val c1: Color,
-    val c2: Color,
+    val rating: Double,
+    val poster: String?,
+    val backdrop: String?,
     val progress: Float = 0f
-)
+) {
+    val key: String get() = "$type-$id"
+
+    fun toJson(): JSONObject {
+        val o = JSONObject()
+        o.put("id", id)
+        o.put("type", type)
+        o.put("name", name)
+        o.put("overview", overview)
+        o.put("year", year)
+        o.put("rating", rating)
+        o.put("poster", poster ?: "")
+        o.put("backdrop", backdrop ?: "")
+        o.put("progress", progress.toDouble())
+        return o
+    }
+
+    companion object {
+        fun from(o: JSONObject): Title = Title(
+            o.getInt("id"),
+            o.getString("type"),
+            o.getString("name"),
+            o.optString("overview", ""),
+            o.optString("year", ""),
+            o.optDouble("rating", 0.0),
+            o.optString("poster", "").ifEmpty { null },
+            o.optString("backdrop", "").ifEmpty { null },
+            o.optDouble("progress", 0.0).toFloat()
+        )
+    }
+}
+
+@Immutable
+class RowData(val title: String, val list: List<Title>, val wide: Boolean)
 
 enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
-private val sample = listOf(
-    Title(
-        "Midnight Harbor", "Thriller", "2024",
-        "A night-shift harbor master uncovers a smuggling ring hiding in plain sight, and the tide is running out.",
-        Color(0xFF5B2A86), Color(0xFFE5566D), 0.62f
-    ),
-    Title(
-        "Solar Drift", "Sci-Fi", "2025",
-        "A salvage crew drifting past the sun finds a ship that should have been lost a century ago.",
-        Color(0xFF0B3C5D), Color(0xFF2EC4B6), 0.35f
-    ),
-    Title(
-        "The Quiet Hours", "Drama", "2023",
-        "Three strangers share one sleepless night in a small town and change each other's lives.",
-        Color(0xFF3D2C8D), Color(0xFFB983FF), 0.8f
-    ),
-    Title(
-        "Paper Lanterns", "Fantasy", "2024",
-        "When the festival lights go out, a young lantern maker must follow them into the sky.",
-        Color(0xFFFF5F6D), Color(0xFFFFC371), 0.15f
-    ),
-    Title(
-        "Glass Houses", "Mystery", "2022",
-        "Every window in the street hides a secret, and someone is watching all of them.",
-        Color(0xFF0F5E6E), Color(0xFF8FD694), 0.5f
-    ),
-    Title(
-        "Northbound", "Adventure", "2025",
-        "Two rivals share one map and one frozen road to the top of the world.",
-        Color(0xFF1D3557), Color(0xFF5AA9E6)
-    ),
-    Title(
-        "Velvet Sky", "Romance", "2021",
-        "A touring pianist and a night-train conductor keep missing each other across Europe.",
-        Color(0xFF7B2FF7), Color(0xFFF107A3)
-    ),
-    Title(
-        "Static", "Horror", "2024",
-        "The signal only comes in after midnight, and it knows your name.",
-        Color(0xFF1B1B2F), Color(0xFF9D4EDD)
-    )
-)
+// ======================= Storage =======================
 
-// ---------- Glass helpers ----------
+class Store(ctx: Context) {
+    private val p = ctx.getSharedPreferences("frametv", Context.MODE_PRIVATE)
+
+    fun get(k: String): String = p.getString(k, "") ?: ""
+    fun put(k: String, v: String) {
+        p.edit().putString(k, v).apply()
+    }
+
+    private fun readList(k: String): List<Title> {
+        val raw = get(k).ifEmpty { "[]" }
+        val arr = try { JSONArray(raw) } catch (e: Exception) { JSONArray() }
+        val out = ArrayList<Title>()
+        for (i in 0 until arr.length()) {
+            try { out.add(Title.from(arr.getJSONObject(i))) } catch (e: Exception) { }
+        }
+        return out
+    }
+
+    private fun writeList(k: String, l: List<Title>) {
+        val arr = JSONArray()
+        l.forEach { arr.put(it.toJson()) }
+        put(k, arr.toString())
+    }
+
+    fun recent(): List<Title> = readList("recent")
+    fun saved(): List<Title> = readList("saved")
+
+    fun addRecent(t: Title): List<Title> {
+        val l = (listOf(t.copy(progress = 0.1f)) + recent().filter { it.key != t.key }).take(15)
+        writeList("recent", l)
+        return l
+    }
+
+    fun toggleSaved(t: Title): List<Title> {
+        val cur = saved()
+        val l = if (cur.any { it.key == t.key }) cur.filter { it.key != t.key } else listOf(t) + cur
+        writeList("saved", l)
+        return l
+    }
+}
+
+// ======================= TMDB =======================
+
+object Tmdb {
+    private const val BASE = "https://api.themoviedb.org/3"
+
+    private class RowDef(val title: String, val path: String, val type: String?)
+
+    private fun JSONObject.str(k: String): String? =
+        if (isNull(k)) null else optString(k).ifEmpty { null }
+
+    private fun get(path: String, key: String, params: String = ""): JSONObject? {
+        return try {
+            val bearer = key.startsWith("eyJ")
+            val sb = StringBuilder(BASE).append(path).append("?language=en-US")
+            if (params.isNotEmpty()) sb.append("&").append(params)
+            if (!bearer) sb.append("&api_key=").append(key)
+            val c = URL(sb.toString()).openConnection() as HttpURLConnection
+            c.connectTimeout = 10000
+            c.readTimeout = 10000
+            c.setRequestProperty("accept", "application/json")
+            if (bearer) c.setRequestProperty("Authorization", "Bearer $key")
+            if (c.responseCode != 200) {
+                null
+            } else {
+                val text = c.inputStream.bufferedReader().use { it.readText() }
+                JSONObject(text)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun parse(arr: JSONArray?, defType: String?): List<Title> {
+        if (arr == null) return emptyList()
+        val out = ArrayList<Title>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val type = o.str("media_type") ?: defType ?: "movie"
+            if (type != "movie" && type != "tv") continue
+            val name = o.str("title") ?: o.str("name") ?: continue
+            val poster = o.str("poster_path")
+            val backdrop = o.str("backdrop_path")
+            if (poster == null && backdrop == null) continue
+            val date = o.str("release_date") ?: o.str("first_air_date") ?: ""
+            out.add(
+                Title(
+                    o.optInt("id"),
+                    type,
+                    name,
+                    o.str("overview") ?: "",
+                    date.take(4),
+                    o.optDouble("vote_average", 0.0),
+                    poster,
+                    backdrop
+                )
+            )
+        }
+        return out.distinctBy { it.key }
+    }
+
+    private suspend fun list(path: String, key: String, defType: String?): List<Title> =
+        withContext(Dispatchers.IO) {
+            parse(get(path, key)?.optJSONArray("results"), defType)
+        }
+
+    suspend fun loadRows(key: String): List<RowData> = coroutineScope {
+        val defs = listOf(
+            RowDef("Trending This Week", "/trending/all/week", null),
+            RowDef("Popular Movies", "/movie/popular", "movie"),
+            RowDef("Popular Series", "/tv/popular", "tv"),
+            RowDef("Top Rated Movies", "/movie/top_rated", "movie"),
+            RowDef("Top Rated Series", "/tv/top_rated", "tv")
+        )
+        defs.map { d -> async { RowData(d.title, list(d.path, key, d.type), false) } }
+            .awaitAll()
+            .filter { it.list.isNotEmpty() }
+    }
+
+    suspend fun search(q: String, key: String): List<Title> = withContext(Dispatchers.IO) {
+        val enc = URLEncoder.encode(q, "UTF-8")
+        parse(get("/search/multi", key, "query=$enc&include_adult=false")?.optJSONArray("results"), null)
+            .filter { it.poster != null }
+    }
+}
+
+// ======================= Images =======================
+
+fun img(path: String?, size: String): String? =
+    if (path.isNullOrEmpty()) null else "https://image.tmdb.org/t/p/$size$path"
+
+fun vivid(argb: Int): Color {
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(argb, hsv)
+    hsv[1] = (hsv[1] * 1.4f).coerceIn(0.35f, 1f)
+    hsv[2] = hsv[2].coerceIn(0.55f, 1f)
+    return Color(android.graphics.Color.HSVToColor(hsv))
+}
+
+fun averageColor(b: Bitmap): Color {
+    val s = Bitmap.createScaledBitmap(b, 16, 16, true)
+    var r = 0L
+    var g = 0L
+    var bl = 0L
+    for (x in 0 until 16) {
+        for (y in 0 until 16) {
+            val p = s.getPixel(x, y)
+            r += (p shr 16) and 0xFF
+            g += (p shr 8) and 0xFF
+            bl += p and 0xFF
+        }
+    }
+    val n = 256
+    return vivid(android.graphics.Color.rgb((r / n).toInt(), (g / n).toInt(), (bl / n).toInt()))
+}
+
+fun placeholder(id: Int): List<Color> {
+    val h = ((id * 47) % 360).toFloat()
+    val a = Color(android.graphics.Color.HSVToColor(floatArrayOf(h, 0.55f, 0.42f)))
+    val b = Color(android.graphics.Color.HSVToColor(floatArrayOf((h + 40f) % 360f, 0.6f, 0.25f)))
+    return listOf(a, b)
+}
+
+class Loaded(val bitmap: Bitmap, val color: Color)
+
+object Img {
+    private val cache = object : LruCache<String, Loaded>(48 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Loaded): Int = value.bitmap.byteCount
+    }
+
+    suspend fun load(url: String): Loaded? {
+        val hit = cache.get(url)
+        if (hit != null) return hit
+        return withContext(Dispatchers.IO) {
+            try {
+                val c = URL(url).openConnection() as HttpURLConnection
+                c.connectTimeout = 10000
+                c.readTimeout = 10000
+                val bmp = c.inputStream.use { BitmapFactory.decodeStream(it) }
+                if (bmp == null) {
+                    null
+                } else {
+                    val loaded = Loaded(bmp, averageColor(bmp))
+                    cache.put(url, loaded)
+                    loaded
+                }
+            } catch (e: Exception) {
+                null
+            }
+        }
+    }
+}
+
+@Composable
+fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
+    var loaded by remember(url) { mutableStateOf<Loaded?>(null) }
+    LaunchedEffect(url) {
+        if (url != null) loaded = Img.load(url)
+    }
+    val bmp = remember(loaded) { loaded?.bitmap?.asImageBitmap() }
+    val fade by animateFloatAsState(if (bmp != null) 1f else 0f, tween(450), label = "imgFade")
+    if (bmp != null) {
+        Image(
+            bitmap = bmp,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier.graphicsLayer { alpha = fade }
+        )
+    }
+}
+
+// ======================= Glass helpers =======================
 
 fun Modifier.glass(shape: Shape, strong: Boolean): Modifier = this
     .clip(shape)
@@ -163,71 +379,163 @@ fun PillButton(
     }
 }
 
-// ---------- Root ----------
+// ======================= Root =======================
 
 @Composable
 fun FrameTvApp() {
-    var tab by remember { mutableStateOf(Tab.Home) }
-    var hero by remember { mutableStateOf(sample[0]) }
+    val ctx = LocalContext.current
+    val store = remember { Store(ctx) }
 
-    val c1 by animateColorAsState(hero.c1, tween(800), label = "c1")
-    val c2 by animateColorAsState(hero.c2, tween(800), label = "c2")
+    var tab by remember { mutableStateOf(Tab.Home) }
+    var tmdbKey by remember { mutableStateOf(store.get("tmdb")) }
+    var status by remember { mutableStateOf(if (store.get("tmdb").isBlank()) "needkey" else "loading") }
+    var rows by remember { mutableStateOf<List<RowData>>(emptyList()) }
+    var recent by remember { mutableStateOf(store.recent()) }
+    var saved by remember { mutableStateOf(store.saved()) }
+    var heroTarget by remember { mutableStateOf<Title?>(null) }
+    var hero by remember { mutableStateOf<Title?>(null) }
+    var glow by remember { mutableStateOf(Color(0xFF3A2C8D)) }
+    val homeState = rememberLazyListState()
     val base = Color(0xFF050509)
+
+    // load TMDB rows whenever the key changes
+    LaunchedEffect(tmdbKey) {
+        if (tmdbKey.isBlank()) {
+            status = "needkey"
+        } else {
+            status = "loading"
+            val loaded = Tmdb.loadRows(tmdbKey)
+            if (loaded.isEmpty()) {
+                status = "error"
+            } else {
+                rows = loaded
+                heroTarget = loaded.first().list.first()
+                status = "ok"
+            }
+        }
+    }
+
+    // wait until focus settles before changing the hero (keeps scrolling smooth)
+    LaunchedEffect(heroTarget) {
+        if (hero == null) {
+            hero = heroTarget
+        } else {
+            delay(220)
+            hero = heroTarget
+        }
+    }
+
+    // glow color comes from the hero backdrop
+    LaunchedEffect(hero?.key) {
+        val u = img(hero?.backdrop ?: hero?.poster, "w1280")
+        if (u != null) {
+            val l = Img.load(u)
+            if (l != null) glow = l.color
+        }
+    }
+
+    val c1 = animateColorAsState(glow, tween(900), label = "c1")
+    val c2 = animateColorAsState(lerp(glow, Color(0xFF2B5BFF), 0.5f), tween(900), label = "c2")
+
+    val onFocus = remember { { t: Title -> heroTarget = t } }
+    val onPlay = remember { { t: Title -> recent = store.addRecent(t) } }
+    val onToggle = remember { { t: Title -> saved = store.toggleSaved(t) } }
+
+    val homeRows = remember(rows, recent) {
+        val cw = if (recent.isNotEmpty()) listOf(RowData("Continue Watching", recent, true)) else emptyList()
+        cw + rows
+    }
 
     Box(
         Modifier
             .fillMaxSize()
             .background(base)
     ) {
-        // glow in the colors of whatever is focused
+        // big backdrop behind everything, fades as you scroll down
         Box(
             Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        listOf(c1.copy(alpha = 0.85f), Color.Transparent),
-                        center = Offset(1500f, 150f),
-                        radius = 1500f
+                .graphicsLayer {
+                    val f = if (homeState.firstVisibleItemIndex > 0) 1f
+                    else (homeState.firstVisibleItemScrollOffset / 600f).coerceIn(0f, 1f)
+                    alpha = if (tab == Tab.Home) 1f - 0.75f * f else 0.3f
+                }
+        ) {
+            Crossfade(
+                targetState = hero?.backdrop,
+                animationSpec = tween(700),
+                modifier = Modifier
+                    .fillMaxWidth(0.85f)
+                    .fillMaxHeight(0.80f)
+                    .align(Alignment.TopEnd),
+                label = "backdrop"
+            ) { b ->
+                RemoteImage(img(b, "w1280"), Modifier.fillMaxSize())
+            }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            0f to base,
+                            0.30f to base.copy(alpha = 0.92f),
+                            0.75f to Color.Transparent
+                        )
                     )
-                )
-        )
+            )
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.45f to Color.Transparent,
+                            0.80f to base
+                        )
+                    )
+            )
+        }
+
+        // colored glow drawn in the draw phase (no recomposition while it animates)
         Box(
             Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        listOf(c2.copy(alpha = 0.55f), Color.Transparent),
-                        center = Offset(200f, 700f),
-                        radius = 1300f
+                .drawBehind {
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(c1.value.copy(alpha = 0.50f), Color.Transparent),
+                            center = Offset(size.width * 0.85f, size.height * 0.05f),
+                            radius = size.width * 0.7f
+                        )
                     )
-                )
-        )
-        // darken toward the bottom so rows stay readable
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        0.40f to Color.Transparent,
-                        1f to base.copy(alpha = 0.92f)
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(c2.value.copy(alpha = 0.32f), Color.Transparent),
+                            center = Offset(size.width * 0.05f, size.height * 0.9f),
+                            radius = size.width * 0.6f
+                        )
                     )
-                )
+                }
         )
 
         Column(Modifier.fillMaxSize()) {
             TopNav(tab) { tab = it }
             when (tab) {
-                Tab.Home -> HomeScreen(hero) { hero = it }
-                Tab.Search -> SearchScreen { hero = it }
-                Tab.Library -> LibraryScreen { hero = it }
-                Tab.Settings -> SettingsScreen()
+                Tab.Home -> HomeScreen(homeState, hero, homeRows, status, saved, onFocus, onPlay, onToggle)
+                Tab.Search -> SearchScreen(
+                    tmdbKey,
+                    rows.firstOrNull()?.list ?: emptyList(),
+                    onFocus,
+                    onPlay
+                )
+                Tab.Library -> LibraryScreen(saved, recent, onFocus, onPlay)
+                Tab.Settings -> SettingsScreen(store) { tmdbKey = it }
             }
         }
     }
 }
 
-// ---------- Top nav ----------
+// ======================= Top nav =======================
 
 @Composable
 fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
@@ -298,49 +606,99 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-// ---------- Home ----------
+// ======================= Home =======================
 
 @Composable
-fun HomeScreen(hero: Title, onFocus: (Title) -> Unit) {
+fun StatusMessage(status: String) {
+    val msg = when (status) {
+        "needkey" -> Pair("Add your TMDB key", "Open Settings and paste your TMDB API key to load movies and shows.")
+        "loading" -> Pair("Loading", "Getting the latest titles")
+        else -> Pair("Couldn't load titles", "Check your TMDB key and internet connection in Settings.")
+    }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 64.dp),
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(msg.first, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        Text(msg.second, color = Color.White.copy(alpha = 0.7f), fontSize = 20.sp)
+    }
+}
+
+@Composable
+fun HomeScreen(
+    state: LazyListState,
+    hero: Title?,
+    rows: List<RowData>,
+    status: String,
+    saved: List<Title>,
+    onFocus: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onToggle: (Title) -> Unit
+) {
+    if (status != "ok" || hero == null) {
+        StatusMessage(status)
+    } else {
+        HomeContent(state, hero, rows, saved, onFocus, onPlay, onToggle)
+    }
+}
+
+@Composable
+fun HomeContent(
+    state: LazyListState,
+    hero: Title,
+    rows: List<RowData>,
+    saved: List<Title>,
+    onFocus: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onToggle: (Title) -> Unit
+) {
     val playFocus = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    val peek = with(LocalDensity.current) { 120.dp.roundToPx() }
+    var lastRow by remember { mutableStateOf(-1) }
+
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
 
+    // Netflix-style: glide so the focused row sits near the top
+    val goTo = remember(state, scope, peek) {
+        { row: Int ->
+            if (row != lastRow) {
+                lastRow = row
+                scope.launch {
+                    if (row == 0) state.animateScrollToItem(0)
+                    else state.animateScrollToItem(row, -peek)
+                }
+                Unit
+            }
+        }
+    }
+
+    val inList = saved.any { it.key == hero.key }
+
     LazyColumn(
-        contentPadding = PaddingValues(top = 10.dp, bottom = 80.dp),
-        verticalArrangement = Arrangement.spacedBy(22.dp)
+        state = state,
+        contentPadding = PaddingValues(top = 10.dp, bottom = 140.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
+        item(key = "hero") {
             Box(
                 Modifier
                     .fillMaxWidth()
                     .height(400.dp)
                     .padding(horizontal = 64.dp)
             ) {
-                // huge faint letter on the right
-                Crossfade(
-                    targetState = hero,
-                    animationSpec = tween(600),
-                    modifier = Modifier.align(Alignment.CenterEnd),
-                    label = "letter"
-                ) { h ->
-                    Text(
-                        h.name.first().toString(),
-                        color = Color.White.copy(alpha = 0.08f),
-                        fontSize = 340.sp,
-                        fontWeight = FontWeight.Black,
-                        modifier = Modifier.padding(end = 40.dp)
-                    )
-                }
-
                 Column(
                     Modifier
                         .align(Alignment.BottomStart)
                         .widthIn(max = 760.dp)
                 ) {
-                    Crossfade(targetState = hero, animationSpec = tween(500), label = "hero") { h ->
+                    Crossfade(targetState = hero, animationSpec = tween(450), label = "hero") { h ->
                         Column {
                             Text(
-                                "FEATURED  ·  ${h.genre.uppercase()}",
+                                if (h.type == "tv") "FEATURED  ·  SERIES" else "FEATURED  ·  MOVIE",
                                 color = Color.White.copy(alpha = 0.7f),
                                 fontSize = 14.sp,
                                 letterSpacing = 3.sp,
@@ -350,85 +708,113 @@ fun HomeScreen(hero: Title, onFocus: (Title) -> Unit) {
                             Text(
                                 h.name,
                                 color = Color.White,
-                                fontSize = 66.sp,
+                                fontSize = 60.sp,
                                 fontWeight = FontWeight.Bold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Spacer(Modifier.height(10.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(h.year, color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp)
-                                Spacer(Modifier.width(14.dp))
-                                Box(
-                                    Modifier
-                                        .glass(RoundedCornerShape(6.dp), false)
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text("4K", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                if (h.year.isNotEmpty()) {
+                                    Text(h.year, color = Color.White.copy(alpha = 0.85f), fontSize = 18.sp)
+                                    Spacer(Modifier.width(14.dp))
                                 }
-                                Spacer(Modifier.width(8.dp))
-                                Box(
-                                    Modifier
-                                        .glass(RoundedCornerShape(6.dp), false)
-                                        .padding(horizontal = 8.dp, vertical = 2.dp)
-                                ) {
-                                    Text("HDR", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                if (h.rating > 0.0) {
+                                    Box(
+                                        Modifier
+                                            .glass(RoundedCornerShape(8.dp), false)
+                                            .padding(horizontal = 10.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            "★ " + String.format("%.1f", h.rating),
+                                            color = Color.White,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                             Spacer(Modifier.height(12.dp))
                             Text(
-                                h.desc,
+                                h.overview,
                                 color = Color.White.copy(alpha = 0.78f),
                                 fontSize = 19.sp,
                                 lineHeight = 27.sp,
-                                maxLines = 2,
+                                maxLines = 3,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                     Spacer(Modifier.height(24.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        PillButton("▶  Play", Modifier.focusRequester(playFocus), primary = true)
-                        PillButton("+  My List")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.onFocusChanged { if (it.hasFocus) goTo(0) }
+                    ) {
+                        PillButton("▶  Play", Modifier.focusRequester(playFocus), primary = true) {
+                            onPlay(hero)
+                        }
+                        PillButton(if (inList) "✓  In My List" else "+  My List") { onToggle(hero) }
                     }
                 }
             }
         }
 
-        item { PosterRow("Continue Watching", sample.filter { it.progress > 0f }, wide = true, onFocus = onFocus) }
-        item { PosterRow("Trending Now", sample, wide = false, onFocus = onFocus) }
-        item { PosterRow("Because You Watched", sample.reversed(), wide = false, onFocus = onFocus) }
+        itemsIndexed(rows, key = { _, r -> r.title }) { i, r ->
+            PosterRow(r, i + 1, onFocus, onPlay, goTo)
+        }
     }
 }
 
-// ---------- Rows & cards ----------
+// ======================= Rows & cards =======================
 
 @Composable
-fun PosterRow(title: String, list: List<Title>, wide: Boolean, onFocus: (Title) -> Unit) {
+fun PosterRow(
+    row: RowData,
+    rowIndex: Int,
+    onFocus: (Title) -> Unit,
+    onPlay: (Title) -> Unit,
+    onRowFocus: (Int) -> Unit = { _ -> }
+) {
+    val rowState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     Column {
         Text(
-            title,
+            row.title,
             color = Color.White,
             fontSize = 26.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(start = 64.dp)
         )
         LazyRow(
+            state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp, vertical = 26.dp),
             horizontalArrangement = Arrangement.spacedBy(26.dp)
         ) {
-            items(list) { PosterCard(it, wide, onFocus) }
+            itemsIndexed(row.list, key = { _, t -> t.key }) { i, t ->
+                PosterCard(
+                    t,
+                    row.wide,
+                    onFocused = {
+                        onFocus(t)
+                        onRowFocus(rowIndex)
+                        scope.launch { rowState.animateScrollToItem((i - 1).coerceAtLeast(0)) }
+                    },
+                    onClick = { onPlay(t) }
+                )
+            }
         }
     }
 }
 
 @Composable
-fun PosterCard(t: Title, wide: Boolean, onFocus: (Title) -> Unit) {
+fun PosterCard(t: Title, wide: Boolean, onFocused: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.10f else 1f, tween(200), label = "card")
+    val scale by animateFloatAsState(if (focused) 1.10f else 1f, tween(220), label = "card")
     val shape = RoundedCornerShape(26.dp)
     val w = if (wide) 360.dp else 210.dp
-    val h = if (wide) 202.dp else 300.dp
+    val h = if (wide) 202.dp else 315.dp
+    val url = if (wide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w342")
+    val ph = remember(t.id) { placeholder(t.id) }
 
     Column(
         Modifier
@@ -441,10 +827,10 @@ fun PosterCard(t: Title, wide: Boolean, onFocus: (Title) -> Unit) {
                 .height(h)
                 .onFocusChanged {
                     focused = it.isFocused
-                    if (it.isFocused) onFocus(t)
+                    if (it.isFocused) onFocused()
                 }
                 .clip(shape)
-                .background(Brush.linearGradient(listOf(t.c1, t.c2)))
+                .background(Brush.linearGradient(ph))
                 .border(
                     if (focused) 3.dp else 1.dp,
                     Brush.verticalGradient(
@@ -458,43 +844,44 @@ fun PosterCard(t: Title, wide: Boolean, onFocus: (Title) -> Unit) {
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = {}
+                    onClick = onClick
                 )
         ) {
-            // light bloom in the top-left corner
+            if (url == null) {
+                Text(
+                    t.name.take(1),
+                    color = Color.White.copy(alpha = 0.25f),
+                    fontSize = 120.sp,
+                    fontWeight = FontWeight.Black,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+            RemoteImage(url, Modifier.fillMaxSize())
+            // soft light bloom, top-left
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.radialGradient(
-                            listOf(Color.White.copy(alpha = 0.35f), Color.Transparent),
+                            listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
                             center = Offset(40f, 40f),
                             radius = 420f
                         )
                     )
             )
-            // big faint initial
-            Text(
-                t.name.first().toString(),
-                color = Color.White.copy(alpha = 0.18f),
-                fontSize = if (wide) 150.sp else 190.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 18.dp)
-            )
-            // bottom scrim
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            0.55f to Color.Transparent,
-                            1f to Color.Black.copy(alpha = 0.55f)
+            if (wide) {
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                0.6f to Color.Transparent,
+                                1f to Color.Black.copy(alpha = 0.6f)
+                            )
                         )
-                    )
-            )
+                )
+            }
             if (wide && t.progress > 0f) {
                 Box(
                     Modifier
@@ -525,7 +912,7 @@ fun PosterCard(t: Title, wide: Boolean, onFocus: (Title) -> Unit) {
             modifier = Modifier.padding(horizontal = 6.dp)
         )
         Text(
-            "${t.genre} · ${t.year}",
+            (if (t.type == "tv") "Series" else "Movie") + (if (t.year.isNotEmpty()) " · ${t.year}" else ""),
             color = Color.White.copy(alpha = 0.55f),
             fontSize = 14.sp,
             modifier = Modifier.padding(horizontal = 6.dp)
@@ -533,13 +920,36 @@ fun PosterCard(t: Title, wide: Boolean, onFocus: (Title) -> Unit) {
     }
 }
 
-// ---------- Search ----------
+// ======================= Search =======================
 
 @Composable
-fun SearchScreen(onFocus: (Title) -> Unit) {
+fun SearchScreen(
+    tmdbKey: String,
+    fallback: List<Title>,
+    onFocus: (Title) -> Unit,
+    onPlay: (Title) -> Unit
+) {
     var query by remember { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
-    val results = if (query.isBlank()) sample else sample.filter { it.name.contains(query, true) }
+    var results by remember { mutableStateOf<List<Title>>(emptyList()) }
+    var searching by remember { mutableStateOf(false) }
+
+    LaunchedEffect(query, tmdbKey) {
+        if (query.trim().length < 2 || tmdbKey.isBlank()) {
+            results = emptyList()
+            searching = false
+        } else {
+            searching = true
+            delay(450)
+            results = Tmdb.search(query.trim(), tmdbKey)
+            searching = false
+        }
+    }
+
+    val isQuery = query.trim().length >= 2
+    val showing = if (isQuery) results else fallback
+    val label = if (isQuery) "Results" else "Trending"
+    val rowData = remember(showing, label) { RowData(label, showing, false) }
 
     Column(Modifier.padding(top = 30.dp)) {
         Box(
@@ -564,45 +974,75 @@ fun SearchScreen(onFocus: (Title) -> Unit) {
             )
         }
         Spacer(Modifier.height(16.dp))
-        if (results.isEmpty()) {
+        if (tmdbKey.isBlank()) {
             Text(
-                "No results",
+                "Add your TMDB key in Settings to search.",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 20.sp,
+                modifier = Modifier.padding(start = 64.dp, top = 20.dp)
+            )
+        } else if (isQuery && showing.isEmpty()) {
+            Text(
+                if (searching) "Searching…" else "No results",
                 color = Color.White.copy(alpha = 0.6f),
                 fontSize = 20.sp,
                 modifier = Modifier.padding(start = 64.dp, top = 20.dp)
             )
         } else {
-            PosterRow(
-                if (query.isBlank()) "Top Searches" else "Results",
-                results,
-                wide = false,
-                onFocus = onFocus
-            )
+            PosterRow(rowData, 0, onFocus, onPlay)
         }
     }
 }
 
-// ---------- Library ----------
+// ======================= Library =======================
 
 @Composable
-fun LibraryScreen(onFocus: (Title) -> Unit) {
-    LazyColumn(
-        contentPadding = PaddingValues(top = 30.dp, bottom = 80.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        item { PosterRow("My List", sample.take(5), wide = false, onFocus = onFocus) }
-        item { PosterRow("Watched", sample.takeLast(4), wide = true, onFocus = onFocus) }
+fun LibraryScreen(
+    saved: List<Title>,
+    recent: List<Title>,
+    onFocus: (Title) -> Unit,
+    onPlay: (Title) -> Unit
+) {
+    val savedRow = remember(saved) { RowData("My List", saved, false) }
+    val recentRow = remember(recent) { RowData("Recently Played", recent, true) }
+
+    if (saved.isEmpty() && recent.isEmpty()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 64.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Nothing here yet", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Add titles with My List, and what you play shows up here.",
+                color = Color.White.copy(alpha = 0.7f),
+                fontSize = 20.sp
+            )
+        }
+    } else {
+        LazyColumn(
+            contentPadding = PaddingValues(top = 30.dp, bottom = 80.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            if (saved.isNotEmpty()) {
+                item(key = "saved") { PosterRow(savedRow, 0, onFocus, onPlay) }
+            }
+            if (recent.isNotEmpty()) {
+                item(key = "recent") { PosterRow(recentRow, 0, onFocus, onPlay) }
+            }
+        }
     }
 }
 
-// ---------- Settings ----------
+// ======================= Settings =======================
 
 @Composable
-fun SettingsScreen() {
-    val ctx = LocalContext.current
-    val prefs = remember { ctx.getSharedPreferences("frametv", Context.MODE_PRIVATE) }
-    var torbox by remember { mutableStateOf(prefs.getString("torbox", "") ?: "") }
-    var rd by remember { mutableStateOf(prefs.getString("realdebrid", "") ?: "") }
+fun SettingsScreen(store: Store, onSaved: (String) -> Unit) {
+    var tmdb by remember { mutableStateOf(store.get("tmdb")) }
+    var torbox by remember { mutableStateOf(store.get("torbox")) }
+    var rd by remember { mutableStateOf(store.get("realdebrid")) }
     var saved by remember { mutableStateOf(false) }
 
     Box(
@@ -612,10 +1052,18 @@ fun SettingsScreen() {
             .glass(RoundedCornerShape(36.dp), false)
             .padding(40.dp)
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(
+            Modifier.verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
             Text("Settings", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
-            Text("Connect your service", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+            Text(
+                "Get a free TMDB key at themoviedb.org → Settings → API",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 16.sp
+            )
 
+            GlassField("TMDB API key", tmdb) { tmdb = it; saved = false }
             GlassField("TorBox API key", torbox) { torbox = it; saved = false }
             GlassField("Real-Debrid API key", rd) { rd = it; saved = false }
 
@@ -624,11 +1072,11 @@ fun SettingsScreen() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 PillButton("Save", primary = true) {
-                    prefs.edit()
-                        .putString("torbox", torbox.trim())
-                        .putString("realdebrid", rd.trim())
-                        .apply()
+                    store.put("tmdb", tmdb.trim())
+                    store.put("torbox", torbox.trim())
+                    store.put("realdebrid", rd.trim())
                     saved = true
+                    onSaved(tmdb.trim())
                 }
                 if (saved) Text("Saved", color = Color(0xFF7CE0A3), fontSize = 18.sp)
             }

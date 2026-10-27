@@ -36,6 +36,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -242,7 +244,7 @@ object TorBoxScraper {
                     }
                 }
             } catch (e: Exception) {
-                // Fallback stream on connection error
+                // Fallback stream
             }
         }
         "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
@@ -489,7 +491,7 @@ suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 300) {
     }
 }
 
-// ======================= Apple TV Clean Glass Styling =======================
+// ======================= Apple TV / Netflix Clean Glass Styling =======================
 
 fun Modifier.appleGlass(shape: Shape, focused: Boolean): Modifier = this
     .clip(shape)
@@ -567,7 +569,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.5 (Linux; Android)")
+            .setUserAgent("FrameTV/1.6 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -741,7 +743,6 @@ fun formatTime(ms: Long): String {
 fun FrameTvApp() {
     val ctx = LocalContext.current
     val store = remember { Store(ctx) }
-    val scope = rememberCoroutineScope()
 
     var tab by remember { mutableStateOf(Tab.Home) }
     var tmdbKey by remember { mutableStateOf(store.get("tmdb")) }
@@ -798,27 +799,6 @@ fun FrameTvApp() {
         { selectedTitle ->
             val updatedRecent = store.addRecent(selectedTitle)
             recent = updatedRecent
-            scope.launch {
-                val streamUrl = TorBoxScraper.resolveStream(selectedTitle, 1, 1, torboxKey)
-                activePlayback = Triple(selectedTitle.name, selectedTitle, streamUrl)
-            }
-        }
-    }
-
-    val onPlayEpisode: (Title, Int, Int) -> Unit = remember {
-        { selectedTitle, sNum, eNum ->
-            val updatedRecent = store.addRecent(selectedTitle)
-            recent = updatedRecent
-            scope.launch {
-                val streamUrl = TorBoxScraper.resolveStream(selectedTitle, sNum, eNum, torboxKey)
-                activePlayback = Triple("${selectedTitle.name} S${sNum}E${eNum}", selectedTitle, streamUrl)
-            }
-        }
-    }
-
-    val onToggle: (Title) -> Unit = remember {
-        { selectedTitle ->
-            saved = store.toggleSaved(selectedTitle)
         }
     }
 
@@ -844,9 +824,27 @@ fun FrameTvApp() {
                 tmdbKey = tmdbKey,
                 torboxKey = torboxKey,
                 saved = saved.any { it.key == d.key },
-                onPlay = { onPlay(d) },
-                onPlayEpisode = onPlayEpisode,
-                onToggle = { onToggle(d) }
+                onPlay = { 
+                    val updatedRecent = store.addRecent(d)
+                    recent = updatedRecent
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val stream = TorBoxScraper.resolveStream(d, 1, 1, torboxKey)
+                        withContext(Dispatchers.Main) {
+                            activePlayback = Triple(d.name, d, stream)
+                        }
+                    }
+                },
+                onPlayEpisode = { titleObj, sNum, eNum ->
+                    val updatedRecent = store.addRecent(titleObj)
+                    recent = updatedRecent
+                    CoroutineScope(Dispatchers.IO).launch {
+                        val stream = TorBoxScraper.resolveStream(titleObj, sNum, eNum, torboxKey)
+                        withContext(Dispatchers.Main) {
+                            activePlayback = Triple("${titleObj.name} S${sNum}E${eNum}", titleObj, stream)
+                        }
+                    }
+                },
+                onToggle = { saved = store.toggleSaved(d) }
             )
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -857,8 +855,7 @@ fun FrameTvApp() {
                             recentList = recent,
                             rows = rows,
                             status = status,
-                            onOpen = onOpen,
-                            onPlay = onPlay
+                            onOpen = onOpen
                         )
                         Tab.Search -> SearchScreen(
                             tmdbKey,
@@ -974,8 +971,7 @@ fun HomeScreen(
     recentList: List<Title>,
     rows: List<RowData>,
     status: String,
-    onOpen: (Title) -> Unit,
-    onPlay: (Title) -> Unit
+    onOpen: (Title) -> Unit
 ) {
     val listState = rememberLazyListState()
 
@@ -990,13 +986,11 @@ fun HomeScreen(
                 contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
-                // Official Apple TV Horizontal 16:9 "Continue Watching" Shelf
                 if (recentList.isNotEmpty()) {
                     item(key = "continue_watching_shelf") {
                         ContinueWatchingRow(recentList, sz, onOpen)
                     }
                 }
-                // Standard Catalog Rows
                 items(rows, key = { rowItem -> rowItem.title }) { row ->
                     CatalogRow(row, sz, onOpen)
                 }
@@ -1005,7 +999,7 @@ fun HomeScreen(
     }
 }
 
-// ======================= Apple TV Horizontal Continue Watching Shelf =======================
+// ======================= Netflix-Style Expanded Focus Card Engine =======================
 
 @Composable
 fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
@@ -1023,9 +1017,11 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             itemsIndexed(list, key = { _, titleItem -> "cw-${titleItem.key}" }) { i, t ->
-                ContinueWatchingCard(
-                    t,
-                    sz,
+                NetflixExpandedCard(
+                    t = t,
+                    width = sz.cwW,
+                    height = sz.cwH,
+                    isWide = true,
                     onFocused = { scope.launch { rowState.centerItem(i, 280) } },
                     onClick = { onOpen(t) }
                 )
@@ -1033,68 +1029,6 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
         }
     }
 }
-
-@Composable
-fun ContinueWatchingCard(t: Title, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(180), label = "cwScale")
-    val shape = RoundedCornerShape(18.dp)
-    val backdropUrl = img(t.backdrop ?: t.poster, "w780")
-    val ph = remember(t.id) { placeholder(t.id) }
-
-    Column(Modifier.width(sz.cwW)) {
-        Box(
-            Modifier
-                .width(sz.cwW)
-                .height(sz.cwH)
-                .graphicsLayer { scaleX = scale; scaleY = scale }
-                .onFocusChanged { focusState ->
-                    focused = focusState.isFocused
-                    if (focusState.isFocused) onFocused()
-                }
-                .clip(shape)
-                .background(Brush.linearGradient(ph))
-                .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onClick
-                )
-        ) {
-            RemoteImage(backdropUrl, Modifier.fillMaxSize())
-
-            // Apple TV-style progress bar at card bottom
-            val progressVal = if (t.progress > 0f) t.progress else 0.15f
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                    .height(5.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color.Black.copy(alpha = 0.5f))
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth(progressVal)
-                        .fillMaxHeight()
-                        .background(Color.White)
-                )
-            }
-        }
-        Spacer(Modifier.height(10.dp))
-        Text(
-            t.name,
-            color = Color.White.copy(alpha = if (focused) 1f else 0.85f),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-    }
-}
-
-// ======================= Standard Vertical Catalog Rows =======================
 
 @Composable
 fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
@@ -1111,12 +1045,12 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(22.dp)
         ) {
             itemsIndexed(row.list, key = { _, titleItem -> titleItem.key }) { i, t ->
-                PosterCard(
-                    t,
-                    sz,
-                    onFocused = {
-                        scope.launch { rowState.centerItem(i, 280) }
-                    },
+                NetflixExpandedCard(
+                    t = t,
+                    width = sz.posterW,
+                    height = sz.posterH,
+                    isWide = false,
+                    onFocused = { scope.launch { rowState.centerItem(i, 280) } },
                     onClick = { onOpen(t) }
                 )
             }
@@ -1124,19 +1058,68 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
-fun PosterCard(t: Title, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) {
+fun NetflixExpandedCard(
+    t: Title,
+    width: Dp,
+    height: Dp,
+    isWide: Boolean,
+    onFocused: () -> Unit,
+    onClick: () -> Unit
+) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(180), label = "cardScale")
-    val shape = RoundedCornerShape(18.dp)
-    val url = img(t.poster ?: t.backdrop, "w342")
+    var showPreview by remember { mutableStateOf(false) }
+    val ctx = LocalContext.current
+
+    // Delayed preview timer (1.5 seconds rest on focus triggers video trailer/preview)
+    LaunchedEffect(focused) {
+        if (focused) {
+            delay(1500)
+            showPreview = true
+        } else {
+            showPreview = false
+        }
+    }
+
+    // Smooth Netflix-style scaling & z-index elevation when focused
+    val scaleAnim by animateFloatAsState(
+        targetValue = if (focused) 1.15f else 1f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "cardScale"
+    )
+
+    val shape = RoundedCornerShape(16.dp)
+    val url = if (isWide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w342")
     val ph = remember(t.id) { placeholder(t.id) }
+
+    // ExoPlayer instance initialized only when expanded preview triggers
+    val exoPlayer = remember(showPreview, t.key) {
+        if (showPreview) {
+            ExoPlayer.Builder(ctx).build().apply {
+                val mediaItem = MediaItem.fromUri("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
+                setMediaItem(mediaItem)
+                repeatMode = Player.REPEAT_MODE_ALL
+                volume = 0f // Muted background trailer preview
+                prepare()
+                playWhenReady = true
+            }
+        } else null
+    }
+
+    DisposableEffect(exoPlayer) {
+        onDispose {
+            exoPlayer?.release()
+        }
+    }
 
     Box(
         Modifier
-            .width(sz.posterW)
-            .height(sz.posterH)
-            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .width(width)
+            .height(height)
+            .scale(scaleAnim)
+            .shadow(if (focused) 24.dp else 4.dp, shape)
+            .zIndex(if (focused) 10f else 1f)
             .onFocusChanged { focusState ->
                 focused = focusState.isFocused
                 if (focusState.isFocused) onFocused()
@@ -1150,16 +1133,70 @@ fun PosterCard(t: Title, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) 
                 onClick = onClick
             )
     ) {
-        if (url == null) {
-            Text(
-                t.name.take(1),
-                color = Color.White.copy(alpha = 0.25f),
-                fontSize = 80.sp,
-                fontWeight = FontWeight.Black,
-                modifier = Modifier.align(Alignment.Center)
+        if (showPreview && exoPlayer != null) {
+            AndroidView(
+                factory = { context ->
+                    PlayerView(context).apply {
+                        player = exoPlayer
+                        useController = false
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
             )
+            // Cinematic Gradient Overlay with Title and metadata inside expanded card
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                        )
+                    )
+                    .padding(12.dp),
+                contentAlignment = Alignment.BottomStart
+            ) {
+                Column {
+                    Text(
+                        t.name,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        "${t.year}  ★ ${String.format(Locale.US, "%.1f", t.rating)}",
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        } else {
+            RemoteImage(url, Modifier.fillMaxSize())
+            if (isWide && t.progress > 0f) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .padding(10.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Color.Black.copy(alpha = 0.5f))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(t.progress)
+                            .fillMaxHeight()
+                            .background(Color.White)
+                    )
+                }
+            }
         }
-        RemoteImage(url, Modifier.fillMaxSize())
     }
 }
 
@@ -1613,7 +1650,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.5", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.6", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",
@@ -1626,6 +1663,11 @@ fun AboutPanel() {
             fontSize = 16.sp
         )
     }
+}
+
+@Composable
+float SecretField(label: String, value: String, onChange: (String) -> Unit) {
+    // Kept inside SecretField helper block
 }
 
 @Composable

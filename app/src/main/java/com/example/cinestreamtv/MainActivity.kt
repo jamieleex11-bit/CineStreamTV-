@@ -9,9 +9,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
@@ -30,7 +32,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -42,6 +43,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -317,6 +319,21 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
     }
 }
 
+// ======================= Smooth scrolling =======================
+
+// Glides the list so item [index] lands at the start edge, with an eased animation.
+suspend fun LazyListState.glideTo(index: Int, durationMs: Int = 420) {
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+    if (item == null) {
+        animateScrollToItem(index)
+    } else {
+        val delta = (item.offset - layoutInfo.beforeContentPadding).toFloat()
+        if (delta != 0f) {
+            animateScrollBy(delta, tween(durationMs, easing = FastOutSlowInEasing))
+        }
+    }
+}
+
 // ======================= Glass helpers =======================
 
 fun Modifier.glass(shape: Shape, strong: Boolean): Modifier = this
@@ -415,13 +432,16 @@ fun FrameTvApp() {
         }
     }
 
-    // wait until focus settles before changing the hero (keeps scrolling smooth)
-    LaunchedEffect(heroTarget) {
-        if (hero == null) {
-            hero = heroTarget
-        } else {
-            delay(220)
-            hero = heroTarget
+    // wait until focus settles before changing the hero.
+    // snapshotFlow keeps the root from recomposing on every D-pad move.
+    LaunchedEffect(Unit) {
+        snapshotFlow { heroTarget }.collectLatest { t ->
+            if (hero == null) {
+                hero = t
+            } else {
+                delay(250)
+                hero = t
+            }
         }
     }
 
@@ -657,20 +677,16 @@ fun HomeContent(
 ) {
     val playFocus = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
-    val peek = with(LocalDensity.current) { 120.dp.roundToPx() }
     var lastRow by remember { mutableStateOf(-1) }
 
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
 
-    // Netflix-style: glide so the focused row sits near the top
-    val goTo = remember(state, scope, peek) {
+    // glide so the focused row sits right at the top, nothing from the row above showing
+    val goTo = remember(state, scope) {
         { row: Int ->
             if (row != lastRow) {
                 lastRow = row
-                scope.launch {
-                    if (row == 0) state.animateScrollToItem(0)
-                    else state.animateScrollToItem(row, -peek)
-                }
+                scope.launch { state.glideTo(row, 450) }
                 Unit
             }
         }
@@ -797,7 +813,7 @@ fun PosterRow(
                     onFocused = {
                         onFocus(t)
                         onRowFocus(rowIndex)
-                        scope.launch { rowState.animateScrollToItem((i - 1).coerceAtLeast(0)) }
+                        scope.launch { rowState.glideTo((i - 1).coerceAtLeast(0), 320) }
                     },
                     onClick = { onPlay(t) }
                 )

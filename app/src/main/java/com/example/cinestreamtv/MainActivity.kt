@@ -1,4 +1,5 @@
 package com.example.cinestreamtv
+
 import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
@@ -146,7 +147,7 @@ enum class Tab(val label: String) {
 class Sizes(val posterH: Dp, val posterW: Dp)
 
 fun sizesFor(maxH: Dp): Sizes {
-    val ph = (maxH * 0.45f - 40.dp) / 1.15f
+    val ph = (maxH * 0.44f - 30.dp)
     return Sizes(ph, ph * 0.67f)
 }
 
@@ -240,10 +241,10 @@ object TorBoxScraper {
                     }
                 }
             } catch (e: Exception) {
-                // Fallback to demo video if network error occurs during cache check
+                // Fallback to sample stream if offline/invalid query
             }
         }
-        // Guaranteed working fallback stream URL
+        // Universal backup stream URL
         "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
     }
 }
@@ -290,7 +291,7 @@ object Tmdb {
             val name = o.str("title") ?: o.str("name") ?: continue
             val poster = o.str("poster_path")
             val backdrop = o.str("backdrop_path")
-            if (poster == null && backdrop == null) continue
+            if (poster == null) continue // Require poster for uniform card layouts
             val date = o.str("release_date") ?: o.str("first_air_date") ?: ""
             out.add(
                 Title(
@@ -957,7 +958,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
 fun StatusMessage(status: String) {
     val msg = when (status) {
         "needkey" -> Pair("Add your TMDB key", "Open Settings and paste your TMDB API key to load movies and shows.")
-        "loading" -> Pair("Loading Catalogs", "Fetching Apple TV & Netflix categories…")
+        "loading" -> Pair("Loading Catalogs", "Fetching Apple TV categories…")
         else -> Pair("Couldn't load titles", "Check your TMDB key and internet connection in Settings.")
     }
     Column(

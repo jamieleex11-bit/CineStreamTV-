@@ -558,12 +558,12 @@ fun FrameTvApp() {
         }
     }
 
-    val onOpen: (Title) -> Unit = remember {
-        { t -> detail = t }
+    val onOpen = remember {
+        { t: Title -> detail = t }
     }
 
-    val onPlay: (Title) -> Unit = remember {
-        { t ->
+    val onPlay = remember {
+        { t: Title ->
             recent = store.addRecent(t)
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(t, 1, 1, torboxKey)
@@ -576,8 +576,8 @@ fun FrameTvApp() {
         }
     }
 
-    val onToggle: (Title) -> Unit = remember {
-        { t ->
+    val onToggle = remember {
+        { t: Title ->
             saved = store.toggleSaved(t)
         }
     }

@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
@@ -29,6 +30,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -37,12 +39,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.net.HttpURLConnection
@@ -109,8 +111,30 @@ data class Title(
 @Immutable
 class RowData(val title: String, val list: List<Title>, val wide: Boolean)
 
+data class SeasonInfo(val number: Int, val name: String, val count: Int)
+
+data class Episode(
+    val number: Int,
+    val name: String,
+    val overview: String,
+    val still: String?,
+    val runtime: Int,
+    val air: String
+)
+
+class TitleExtra(val runtime: String, val genres: String, val seasons: List<SeasonInfo>)
+
 enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
+}
+
+// Sizes derived from the screen height so rows fit any TV
+class Sizes(val viewportH: Dp, val posterH: Dp, val posterW: Dp, val wideH: Dp, val wideW: Dp)
+
+fun sizesFor(maxH: Dp): Sizes {
+    val vp = maxH * 0.54f
+    val ph = (vp - 64.dp) / 1.12f
+    return Sizes(vp, ph, ph * 0.667f, ph * 0.9f, ph * 0.9f * 1.6f)
 }
 
 // ======================= Storage =======================
@@ -239,6 +263,43 @@ object Tmdb {
         parse(get("/search/multi", key, "query=$enc&include_adult=false")?.optJSONArray("results"), null)
             .filter { it.poster != null }
     }
+
+    suspend fun details(t: Title, key: String): TitleExtra = withContext(Dispatchers.IO) {
+        val o = get("/${t.type}/${t.id}", key) ?: return@withContext TitleExtra("", "", emptyList())
+        val runtime = if (t.type == "tv") {
+            val m = o.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
+            if (m > 0) "${m}m" else ""
+        } else {
+            val m = o.optInt("runtime", 0)
+            if (m > 0) "${m / 60}h ${m % 60}m" else ""
+        }
+        val genres = o.optJSONArray("genres")?.let { g ->
+            (0 until g.length()).joinToString(" · ") { g.getJSONObject(it).optString("name") }
+        } ?: ""
+        val seasons = o.optJSONArray("seasons")?.let { s ->
+            (0 until s.length()).map { i ->
+                val so = s.getJSONObject(i)
+                SeasonInfo(so.optInt("season_number"), so.optString("name"), so.optInt("episode_count"))
+            }
+        }?.filter { it.number > 0 } ?: emptyList()
+        TitleExtra(runtime, genres, seasons)
+    }
+
+    suspend fun season(id: Int, n: Int, key: String): List<Episode> = withContext(Dispatchers.IO) {
+        val arr = get("/tv/$id/season/$n", key)?.optJSONArray("episodes")
+            ?: return@withContext emptyList<Episode>()
+        (0 until arr.length()).map { i ->
+            val e = arr.getJSONObject(i)
+            Episode(
+                e.optInt("episode_number"),
+                e.optString("name"),
+                e.optString("overview"),
+                e.str("still_path"),
+                e.optInt("runtime", 0),
+                e.optString("air_date")
+            )
+        }
+    }
 }
 
 // ======================= Images =======================
@@ -327,19 +388,6 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
 }
 
 // ======================= Smooth scrolling =======================
-
-// Vertical rows: put item [index] at the top edge of the list.
-suspend fun LazyListState.glideTo(index: Int, durationMs: Int = 450) {
-    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-    if (item == null) {
-        animateScrollToItem(index)
-    } else {
-        val delta = (item.offset - layoutInfo.beforeContentPadding).toFloat()
-        if (abs(delta) > 1f) {
-            animateScrollBy(delta, tween(durationMs, easing = FastOutSlowInEasing))
-        }
-    }
-}
 
 // Horizontal rows: center item [index] in the row.
 suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 320) {
@@ -435,20 +483,22 @@ fun FrameTvApp() {
     var heroTarget by remember { mutableStateOf<Title?>(null) }
     var hero by remember { mutableStateOf<Title?>(null) }
     var glow by remember { mutableStateOf(Color(0xFF3A2C8D)) }
+    var rowIdx by remember { mutableStateOf(0) }
+    var detail by remember { mutableStateOf<Title?>(null) }
     var lastBackPress by remember { mutableStateOf(0L) }
-    val homeState = rememberLazyListState()
     val base = Color(0xFF050509)
 
-    // Back button: leave other tabs for Home, scroll Home to top, double-press to exit
+    val homeRows = remember(rows, recent) {
+        val cw = if (recent.isNotEmpty()) listOf(RowData("Continue Watching", recent, true)) else emptyList()
+        cw + rows
+    }
+
+    // Back: close title page, then leave other tabs, then go to top row, then double-press to exit
     BackHandler {
         when {
-            tab != Tab.Home -> {
-                tab = Tab.Home
-                scope.launch { homeState.scrollToItem(0) }
-            }
-            homeState.firstVisibleItemIndex > 0 || homeState.firstVisibleItemScrollOffset > 0 -> {
-                scope.launch { homeState.animateScrollToItem(0) }
-            }
+            detail != null -> detail = null
+            tab != Tab.Home -> tab = Tab.Home
+            rowIdx > 0 -> rowIdx = 0
             else -> {
                 val now = System.currentTimeMillis()
                 if (now - lastBackPress < 2000L) {
@@ -503,27 +553,27 @@ fun FrameTvApp() {
     val c2 = animateColorAsState(lerp(glow, Color(0xFF2B5BFF), 0.5f), tween(900), label = "c2")
 
     val onFocus = remember { { t: Title -> heroTarget = t } }
-    val onPlay = remember { { t: Title -> recent = store.addRecent(t) } }
-    val onToggle = remember { { t: Title -> saved = store.toggleSaved(t) } }
-
-    val homeRows = remember(rows, recent) {
-        val cw = if (recent.isNotEmpty()) listOf(RowData("Continue Watching", recent, true)) else emptyList()
-        cw + rows
+    val onOpen = remember { { t: Title -> detail = t } }
+    val onPlay = remember {
+        { t: Title ->
+            recent = store.addRecent(t)
+            Toast.makeText(ctx, "Playback starts once TorBox streaming is set up", Toast.LENGTH_SHORT).show()
+        }
     }
+    val onToggle = remember { { t: Title -> saved = store.toggleSaved(t) } }
+    val onRowFocus: (Int) -> Unit = { rowIdx = it }
 
     Box(
         Modifier
             .fillMaxSize()
             .background(base)
     ) {
-        // big backdrop behind everything, fades as you scroll down
+        // big backdrop behind everything
         Box(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    val f = if (homeState.firstVisibleItemIndex > 0) 1f
-                    else (homeState.firstVisibleItemScrollOffset / 600f).coerceIn(0f, 1f)
-                    alpha = if (tab == Tab.Home) 1f - 0.75f * f else 0.3f
+                    alpha = if (detail == null && tab == Tab.Home) 1f else 0.3f
                 }
         ) {
             Crossfade(
@@ -583,19 +633,39 @@ fun FrameTvApp() {
                 }
         )
 
-        Column(Modifier.fillMaxSize()) {
-            TopNav(tab) { tab = it }
+        val d = detail
+        if (d != null) {
+            DetailScreen(
+                t = d,
+                tmdbKey = tmdbKey,
+                saved = saved.any { it.key == d.key },
+                onPlay = { onPlay(d) },
+                onToggle = { onToggle(d) }
+            )
+        } else {
             when (tab) {
-                Tab.Home -> HomeScreen(homeState, hero, homeRows, status, saved, onFocus, onPlay, onToggle)
+                Tab.Home -> HomeScreen(
+                    hero = hero,
+                    rows = homeRows,
+                    status = status,
+                    saved = saved,
+                    rowIdx = rowIdx,
+                    onRowFocus = onRowFocus,
+                    onFocus = onFocus,
+                    onOpen = onOpen,
+                    onPlay = onPlay,
+                    onToggle = onToggle
+                )
                 Tab.Search -> SearchScreen(
                     tmdbKey,
                     rows.firstOrNull()?.list ?: emptyList(),
                     onFocus,
-                    onPlay
+                    onOpen
                 )
-                Tab.Library -> LibraryScreen(saved, recent, onFocus, onPlay)
+                Tab.Library -> LibraryScreen(saved, recent, onFocus, onOpen)
                 Tab.Settings -> SettingsScreen(store) { tmdbKey = it }
             }
+            TopNav(Modifier.align(Alignment.TopCenter), tab) { tab = it }
         }
     }
 }
@@ -603,9 +673,9 @@ fun FrameTvApp() {
 // ======================= Top nav =======================
 
 @Composable
-fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
+fun TopNav(modifier: Modifier, current: Tab, onSelect: (Tab) -> Unit) {
     Box(
-        Modifier
+        modifier
             .fillMaxWidth()
             .padding(top = 28.dp, start = 64.dp, end = 64.dp)
     ) {
@@ -683,7 +753,7 @@ fun StatusMessage(status: String) {
     Column(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = 64.dp),
+            .padding(start = 64.dp, end = 64.dp, top = 110.dp),
         verticalArrangement = Arrangement.Center
     ) {
         Text(msg.first, color = Color.White, fontSize = 44.sp, fontWeight = FontWeight.Bold)
@@ -694,137 +764,113 @@ fun StatusMessage(status: String) {
 
 @Composable
 fun HomeScreen(
-    state: LazyListState,
     hero: Title?,
     rows: List<RowData>,
     status: String,
     saved: List<Title>,
+    rowIdx: Int,
+    onRowFocus: (Int) -> Unit,
     onFocus: (Title) -> Unit,
+    onOpen: (Title) -> Unit,
     onPlay: (Title) -> Unit,
     onToggle: (Title) -> Unit
 ) {
     if (status != "ok" || hero == null) {
         StatusMessage(status)
     } else {
-        HomeContent(state, hero, rows, saved, onFocus, onPlay, onToggle)
+        HomeContent(hero, rows, saved, rowIdx, onRowFocus, onFocus, onOpen, onPlay, onToggle)
     }
 }
 
 @Composable
 fun HomeContent(
-    state: LazyListState,
     hero: Title,
     rows: List<RowData>,
     saved: List<Title>,
+    rowIdx: Int,
+    onRowFocus: (Int) -> Unit,
     onFocus: (Title) -> Unit,
+    onOpen: (Title) -> Unit,
     onPlay: (Title) -> Unit,
     onToggle: (Title) -> Unit
 ) {
     val playFocus = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
-    var lastRow by remember { mutableStateOf(-1) }
-
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
-
-    // Hero goes to the very top; rows glide so their title sits at the top edge
-    val goTo = remember(state, scope) {
-        { row: Int ->
-            if (row != lastRow) {
-                lastRow = row
-                scope.launch {
-                    if (row == 0) state.animateScrollToItem(0)
-                    else state.glideTo(row, 450)
-                }
-                Unit
-            }
-        }
-    }
-
     val inList = saved.any { it.key == hero.key }
 
-    LazyColumn(
-        state = state,
-        contentPadding = PaddingValues(top = 8.dp, bottom = 140.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        item(key = "hero") {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(470.dp)
-                    .padding(horizontal = 64.dp, vertical = 16.dp)
-            ) {
-                Column(
-                    Modifier
-                        .align(Alignment.BottomStart)
-                        .widthIn(max = 760.dp)
-                ) {
-                    Crossfade(targetState = hero, animationSpec = tween(450), label = "hero") { h ->
-                        Column {
-                            Text(
-                                if (h.type == "tv") "FEATURED  ·  SERIES" else "FEATURED  ·  MOVIE",
-                                color = Color.White.copy(alpha = 0.7f),
-                                fontSize = 14.sp,
-                                letterSpacing = 3.sp,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                h.name,
-                                color = Color.White,
-                                fontSize = 60.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Spacer(Modifier.height(10.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (h.year.isNotEmpty()) {
-                                    Text(h.year, color = Color.White.copy(alpha = 0.85f), fontSize = 18.sp)
-                                    Spacer(Modifier.width(14.dp))
-                                }
-                                if (h.rating > 0.0) {
-                                    Box(
-                                        Modifier
-                                            .glass(RoundedCornerShape(8.dp), false)
-                                            .padding(horizontal = 10.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            "★ " + String.format("%.1f", h.rating),
-                                            color = Color.White,
-                                            fontSize = 14.sp,
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                    }
-                                }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sz = sizesFor(maxHeight)
+        val current = rowIdx.coerceIn(0, (rows.size - 1).coerceAtLeast(0))
+        val stripY by animateDpAsState(
+            -(sz.viewportH * current.toFloat()),
+            tween(450, easing = FastOutSlowInEasing),
+            label = "strip"
+        )
+
+        // Hero text sits in the top area
+        Column(
+            Modifier
+                .align(Alignment.TopStart)
+                .padding(start = 64.dp, top = 88.dp)
+                .widthIn(max = 760.dp)
+        ) {
+            Crossfade(targetState = hero, animationSpec = tween(400), label = "heroText") { h ->
+                Column {
+                    Text(
+                        h.name,
+                        color = Color.White,
+                        fontSize = 46.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val kind = if (h.type == "tv") "Series" else "Movie"
+                        Text(
+                            listOf(kind, h.year).filter { it.isNotEmpty() }.joinToString("  ·  "),
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 18.sp
+                        )
+                        if (h.rating > 0.0) {
+                            Spacer(Modifier.width(12.dp))
+                            Box(
+                                Modifier
+                                    .glass(RoundedCornerShape(8.dp), false)
+                                    .padding(horizontal = 10.dp, vertical = 3.dp)
+                            ) {
+                                Text(
+                                    "★ " + String.format("%.1f", h.rating),
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
-                            Spacer(Modifier.height(12.dp))
-                            Text(
-                                h.overview,
-                                color = Color.White.copy(alpha = 0.78f),
-                                fontSize = 19.sp,
-                                lineHeight = 27.sp,
-                                maxLines = 3,
-                                overflow = TextOverflow.Ellipsis
-                            )
                         }
-                    }
-                    Spacer(Modifier.height(24.dp))
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        modifier = Modifier.onFocusChanged { if (it.hasFocus) goTo(0) }
-                    ) {
-                        PillButton("▶  Play", Modifier.focusRequester(playFocus), primary = true) {
-                            onPlay(hero)
-                        }
-                        PillButton(if (inList) "✓  In My List" else "+  My List") { onToggle(hero) }
                     }
                 }
             }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                PillButton("▶  Play", Modifier.focusRequester(playFocus), primary = true) { onPlay(hero) }
+                PillButton("More Info") { onOpen(hero) }
+                PillButton(if (inList) "✓  In My List" else "+  My List") { onToggle(hero) }
+            }
         }
 
-        itemsIndexed(rows, key = { _, r -> r.title }) { i, r ->
-            PosterRow(r, i + 1, onFocus, onPlay, goTo)
+        // Only the focused row is visible, centered in the lower part of the screen
+        Box(
+            Modifier
+                .align(Alignment.BottomStart)
+                .fillMaxWidth()
+                .height(sz.viewportH)
+                .clipToBounds()
+        ) {
+            Column(Modifier.fillMaxWidth().offset(y = stripY)) {
+                rows.forEachIndexed { i, r ->
+                    StripRow(r, i, sz, onFocus, onOpen, onRowFocus)
+                }
+            }
         }
     }
 }
@@ -832,38 +878,37 @@ fun HomeContent(
 // ======================= Rows & cards =======================
 
 @Composable
-fun PosterRow(
+fun StripRow(
     row: RowData,
-    rowIndex: Int,
+    index: Int,
+    sz: Sizes,
     onFocus: (Title) -> Unit,
-    onPlay: (Title) -> Unit,
-    onRowFocus: (Int) -> Unit = { _ -> }
+    onOpen: (Title) -> Unit,
+    onRowFocus: (Int) -> Unit
 ) {
     val rowState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    Column {
-        Text(
-            row.title,
-            color = Color.White,
-            fontSize = 26.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(start = 64.dp)
-        )
+    Column(Modifier.fillMaxWidth().height(sz.viewportH)) {
+        Box(Modifier.height(40.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
+            Text(row.title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+        }
         LazyRow(
             state = rowState,
-            contentPadding = PaddingValues(horizontal = 64.dp, vertical = 36.dp),
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            contentPadding = PaddingValues(horizontal = 64.dp, vertical = 12.dp),
             horizontalArrangement = Arrangement.spacedBy(26.dp)
         ) {
             itemsIndexed(row.list, key = { _, t -> t.key }) { i, t ->
                 PosterCard(
                     t,
                     row.wide,
+                    sz,
                     onFocused = {
                         onFocus(t)
-                        onRowFocus(rowIndex)
+                        onRowFocus(index)
                         scope.launch { rowState.centerItem(i, 320) }
                     },
-                    onClick = { onPlay(t) }
+                    onClick = { onOpen(t) }
                 )
             }
         }
@@ -871,40 +916,255 @@ fun PosterRow(
 }
 
 @Composable
-fun PosterCard(t: Title, wide: Boolean, onFocused: () -> Unit, onClick: () -> Unit) {
+fun StaticRow(row: RowData, sz: Sizes, onFocus: (Title) -> Unit, onOpen: (Title) -> Unit) {
+    val rowState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.height(40.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
+            Text(row.title, color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+        }
+        LazyRow(
+            state = rowState,
+            contentPadding = PaddingValues(horizontal = 64.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(26.dp)
+        ) {
+            itemsIndexed(row.list, key = { _, t -> t.key }) { i, t ->
+                PosterCard(
+                    t,
+                    row.wide,
+                    sz,
+                    onFocused = {
+                        onFocus(t)
+                        scope.launch { rowState.centerItem(i, 320) }
+                    },
+                    onClick = { onOpen(t) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun PosterCard(t: Title, wide: Boolean, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.10f else 1f, tween(220), label = "card")
-    val shape = RoundedCornerShape(26.dp)
-    val w = if (wide) 360.dp else 210.dp
-    val h = if (wide) 202.dp else 315.dp
+    val scale by animateFloatAsState(if (focused) 1.1f else 1f, tween(200), label = "card")
+    val shape = RoundedCornerShape(22.dp)
+    val w = if (wide) sz.wideW else sz.posterW
+    val h = if (wide) sz.wideH else sz.posterH
     val url = if (wide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w342")
     val ph = remember(t.id) { placeholder(t.id) }
 
-    Column(
+    Box(
         Modifier
             .width(w)
+            .height(h)
             .graphicsLayer { scaleX = scale; scaleY = scale }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clip(shape)
+            .background(Brush.linearGradient(ph))
+            .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
     ) {
+        if (url == null) {
+            Text(
+                t.name.take(1),
+                color = Color.White.copy(alpha = 0.25f),
+                fontSize = 96.sp,
+                fontWeight = FontWeight.Black,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        }
+        RemoteImage(url, Modifier.fillMaxSize())
+        if (wide && t.progress > 0f) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 18.dp, vertical = 14.dp)
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.28f))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(t.progress)
+                        .fillMaxHeight()
+                        .background(Color.White)
+                )
+            }
+        }
+    }
+}
+
+// ======================= Title page (Apple TV style) =======================
+
+@Composable
+fun DetailScreen(
+    t: Title,
+    tmdbKey: String,
+    saved: Boolean,
+    onPlay: () -> Unit,
+    onToggle: () -> Unit
+) {
+    var extra by remember(t.key) { mutableStateOf<TitleExtra?>(null) }
+    var showEpisodes by remember(t.key) { mutableStateOf(false) }
+    var season by remember(t.key) { mutableStateOf(1) }
+    var eps by remember(t.key) { mutableStateOf<List<Episode>>(emptyList()) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val playFocus = remember { FocusRequester() }
+    val isShow = t.type == "tv"
+
+    LaunchedEffect(t.key) {
+        val e = Tmdb.details(t, tmdbKey)
+        extra = e
+        season = e.seasons.firstOrNull()?.number ?: 1
+    }
+
+    LaunchedEffect(t.key, season, showEpisodes) {
+        eps = emptyList()
+        if (isShow && showEpisodes) eps = Tmdb.season(t.id, season, tmdbKey)
+    }
+
+    LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
+
+    val meta = listOfNotNull(
+        t.year.ifEmpty { null },
+        if (isShow) "Series" else "Movie",
+        extra?.runtime?.ifEmpty { null },
+        extra?.genres?.ifEmpty { null }
+    ).joinToString("  ·  ")
+
+    Box(Modifier.fillMaxSize()) {
+        RemoteImage(img(t.backdrop ?: t.poster, "w1280"), Modifier.fillMaxSize())
         Box(
             Modifier
-                .fillMaxWidth()
-                .height(h)
-                .onFocusChanged {
-                    focused = it.isFocused
-                    if (it.isFocused) onFocused()
-                }
-                .clip(shape)
-                .background(Brush.linearGradient(ph))
-                .border(
-                    if (focused) 3.dp else 1.dp,
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.White.copy(alpha = if (focused) 1f else 0.45f),
-                            Color.White.copy(alpha = if (focused) 0.55f else 0.05f)
-                        )
-                    ),
-                    shape
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        0f to Color(0xFF050509),
+                        0.45f to Color(0xFF050509).copy(alpha = 0.85f),
+                        1f to Color(0xFF050509).copy(alpha = 0.2f)
+                    )
                 )
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        0.5f to Color.Transparent,
+                        1f to Color(0xFF050509)
+                    )
+                )
+        )
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = 64.dp, end = 64.dp, top = 120.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
+            item {
+                Text(
+                    t.name,
+                    color = Color.White,
+                    fontSize = 56.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(meta, color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp)
+                    if (t.rating > 0.0) {
+                        Spacer(Modifier.width(14.dp))
+                        Text(
+                            "★ " + String.format("%.1f", t.rating),
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+            item {
+                Text(
+                    t.overview.ifEmpty { "No description available." },
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 19.sp,
+                    lineHeight = 27.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 820.dp)
+                )
+            }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    PillButton("▶  Play", Modifier.focusRequester(playFocus), primary = true, onClick = onPlay)
+                    if (isShow) {
+                        PillButton("Episodes") {
+                            showEpisodes = true
+                            scope.launch { listState.animateScrollToItem(4) }
+                        }
+                    }
+                    PillButton(if (saved) "✓  In My List" else "+  My List", onClick = onToggle)
+                }
+            }
+            if (isShow && showEpisodes) {
+                item {
+                    Text("Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.SemiBold)
+                }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(extra?.seasons ?: emptyList(), key = { it.number }) { s ->
+                            PillButton("Season ${s.number}", primary = s.number == season) {
+                                season = s.number
+                            }
+                        }
+                    }
+                }
+                item {
+                    if (eps.isEmpty()) {
+                        Text("Loading episodes…", color = Color.White.copy(alpha = 0.6f), fontSize = 18.sp)
+                    } else {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                            items(eps, key = { it.number }) { e ->
+                                EpisodeCard(e, onClick = onPlay)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EpisodeCard(e: Episode, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(200), label = "ep")
+    val shape = RoundedCornerShape(20.dp)
+    val url = img(e.still, "w300")
+
+    Column(Modifier.width(300.dp).graphicsLayer { scaleX = scale; scaleY = scale }) {
+        Box(
+            Modifier
+                .width(300.dp)
+                .height(170.dp)
+                .onFocusChanged { focused = it.isFocused }
+                .clip(shape)
+                .background(Brush.linearGradient(placeholder(e.number)))
+                .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -913,72 +1173,28 @@ fun PosterCard(t: Title, wide: Boolean, onFocused: () -> Unit, onClick: () -> Un
         ) {
             if (url == null) {
                 Text(
-                    t.name.take(1),
+                    e.number.toString(),
                     color = Color.White.copy(alpha = 0.25f),
-                    fontSize = 120.sp,
+                    fontSize = 64.sp,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.align(Alignment.Center)
                 )
             }
             RemoteImage(url, Modifier.fillMaxSize())
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.radialGradient(
-                            listOf(Color.White.copy(alpha = 0.18f), Color.Transparent),
-                            center = Offset(40f, 40f),
-                            radius = 420f
-                        )
-                    )
-            )
-            if (wide) {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                0f to Color.Transparent,
-                                0.6f to Color.Transparent,
-                                1f to Color.Black.copy(alpha = 0.6f)
-                            )
-                        )
-                )
-            }
-            if (wide && t.progress > 0f) {
-                Box(
-                    Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(horizontal = 18.dp, vertical = 16.dp)
-                        .fillMaxWidth()
-                        .height(5.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White.copy(alpha = 0.28f))
-                ) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth(t.progress)
-                            .fillMaxHeight()
-                            .background(Color.White)
-                    )
-                }
-            }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(8.dp))
         Text(
-            t.name,
-            color = Color.White.copy(alpha = if (focused) 1f else 0.75f),
+            "E${e.number}  ${e.name}",
+            color = Color.White.copy(alpha = if (focused) 1f else 0.8f),
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 6.dp)
+            overflow = TextOverflow.Ellipsis
         )
         Text(
-            (if (t.type == "tv") "Series" else "Movie") + (if (t.year.isNotEmpty()) " · ${t.year}" else ""),
+            if (e.runtime > 0) "${e.runtime} min" else e.air,
             color = Color.White.copy(alpha = 0.55f),
-            fontSize = 14.sp,
-            modifier = Modifier.padding(horizontal = 6.dp)
+            fontSize = 14.sp
         )
     }
 }
@@ -990,7 +1206,7 @@ fun SearchScreen(
     tmdbKey: String,
     fallback: List<Title>,
     onFocus: (Title) -> Unit,
-    onPlay: (Title) -> Unit
+    onOpen: (Title) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
@@ -1014,45 +1230,46 @@ fun SearchScreen(
     val label = if (isQuery) "Results" else "Trending"
     val rowData = remember(showing, label) { RowData(label, showing, false) }
 
-    Column(Modifier.padding(top = 30.dp)) {
-        Box(
-            Modifier
-                .padding(horizontal = 64.dp)
-                .fillMaxWidth()
-                .glass(RoundedCornerShape(32.dp), focused)
-                .padding(horizontal = 32.dp, vertical = 22.dp)
-        ) {
-            if (query.isEmpty()) {
-                Text("Search movies and shows", color = Color.White.copy(alpha = 0.5f), fontSize = 24.sp)
-            }
-            BasicTextField(
-                value = query,
-                onValueChange = { query = it },
-                singleLine = true,
-                textStyle = TextStyle(color = Color.White, fontSize = 24.sp),
-                cursorBrush = SolidColor(Color.White),
-                modifier = Modifier
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sz = sizesFor(maxHeight)
+        Column(Modifier.fillMaxSize().padding(top = 110.dp)) {
+            Box(
+                Modifier
+                    .padding(horizontal = 64.dp)
                     .fillMaxWidth()
-                    .onFocusChanged { focused = it.isFocused }
-            )
-        }
-        Spacer(Modifier.height(16.dp))
-        if (tmdbKey.isBlank()) {
-            Text(
-                "Add your TMDB key in Settings to search.",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 20.sp,
-                modifier = Modifier.padding(start = 64.dp, top = 20.dp)
-            )
-        } else if (isQuery && showing.isEmpty()) {
-            Text(
-                if (searching) "Searching…" else "No results",
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 20.sp,
-                modifier = Modifier.padding(start = 64.dp, top = 20.dp)
-            )
-        } else {
-            PosterRow(rowData, 0, onFocus, onPlay)
+                    .glass(RoundedCornerShape(32.dp), focused)
+                    .padding(horizontal = 32.dp, vertical = 22.dp)
+            ) {
+                if (query.isEmpty()) {
+                    Text("Search movies and shows", color = Color.White.copy(alpha = 0.5f), fontSize = 24.sp)
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    singleLine = true,
+                    textStyle = TextStyle(color = Color.White, fontSize = 24.sp),
+                    cursorBrush = SolidColor(Color.White),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focused = it.isFocused }
+                )
+            }
+            Spacer(Modifier.height(14.dp))
+            when {
+                tmdbKey.isBlank() -> Text(
+                    "Add your TMDB key in Settings to search.",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 20.sp,
+                    modifier = Modifier.padding(start = 64.dp, top = 20.dp)
+                )
+                isQuery && showing.isEmpty() -> Text(
+                    if (searching) "Searching…" else "No results",
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 20.sp,
+                    modifier = Modifier.padding(start = 64.dp, top = 20.dp)
+                )
+                else -> StaticRow(rowData, sz, onFocus, onOpen)
+            }
         }
     }
 }
@@ -1064,36 +1281,37 @@ fun LibraryScreen(
     saved: List<Title>,
     recent: List<Title>,
     onFocus: (Title) -> Unit,
-    onPlay: (Title) -> Unit
+    onOpen: (Title) -> Unit
 ) {
-    val savedRow = remember(saved) { RowData("My List", saved, false) }
-    val recentRow = remember(recent) { RowData("Recently Played", recent, true) }
-
-    if (saved.isEmpty() && recent.isEmpty()) {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .padding(horizontal = 64.dp),
-            verticalArrangement = Arrangement.Center
-        ) {
-            Text("Nothing here yet", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Add titles with My List, and what you play shows up here.",
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 20.sp
-            )
-        }
-    } else {
-        LazyColumn(
-            contentPadding = PaddingValues(top = 30.dp, bottom = 80.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            if (saved.isNotEmpty()) {
-                item(key = "saved") { PosterRow(savedRow, 0, onFocus, onPlay) }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sz = sizesFor(maxHeight)
+        if (saved.isEmpty() && recent.isEmpty()) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(start = 64.dp, end = 64.dp, top = 110.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("Nothing here yet", color = Color.White, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Add titles with My List, and what you play shows up here.",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 20.sp
+                )
             }
-            if (recent.isNotEmpty()) {
-                item(key = "recent") { PosterRow(recentRow, 0, onFocus, onPlay) }
+        } else {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(top = 110.dp, bottom = 60.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                if (saved.isNotEmpty()) {
+                    item(key = "saved") { StaticRow(RowData("My List", saved, false), sz, onFocus, onOpen) }
+                }
+                if (recent.isNotEmpty()) {
+                    item(key = "recent") { StaticRow(RowData("Recently Played", recent, true), sz, onFocus, onOpen) }
+                }
             }
         }
     }
@@ -1108,7 +1326,7 @@ fun SettingsScreen(store: Store, onSaved: (String) -> Unit) {
     Row(
         Modifier
             .fillMaxSize()
-            .padding(horizontal = 64.dp, vertical = 24.dp),
+            .padding(start = 64.dp, end = 64.dp, top = 110.dp, bottom = 24.dp),
         horizontalArrangement = Arrangement.spacedBy(28.dp)
     ) {
         // sidebar
@@ -1202,15 +1420,9 @@ fun ServicesPanel(store: Store, onSaved: (String) -> Unit) {
                 lineHeight = 23.sp
             )
         }
-        item {
-            SecretField("TMDB API key", tmdb) { tmdb = it; saved = false }
-        }
-        item {
-            SecretField("TorBox API key", torbox) { torbox = it; saved = false }
-        }
-        item {
-            SecretField("Real-Debrid API key", rd) { rd = it; saved = false }
-        }
+        item { SecretField("TMDB API key", tmdb) { tmdb = it; saved = false } }
+        item { SecretField("TorBox API key", torbox) { torbox = it; saved = false } }
+        item { SecretField("Real-Debrid API key", rd) { rd = it; saved = false } }
         item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(18.dp),

@@ -1,4 +1,4 @@
-package com.example.cinestreamtv 
+package com.example.cinestreamtv
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -266,7 +267,7 @@ fun HomeScreen() {
 }
 
 @Composable
-fun PosterRow(title: String, items: List<Title>) {
+fun PosterRow(title: String, list: List<Title>) {
     Column {
         Text(
             title,
@@ -279,7 +280,7 @@ fun PosterRow(title: String, items: List<Title>) {
             contentPadding = PaddingValues(horizontal = 56.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.spacedBy(22.dp)
         ) {
-            items(items) { PosterCard(it) }
+            items(list) { PosterCard(it) }
         }
     }
 }

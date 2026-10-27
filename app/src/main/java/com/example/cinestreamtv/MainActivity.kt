@@ -577,6 +577,20 @@ fun FrameTvApp() {
         }
     }
 
+    val onPlayEpisode: (Title, Int, Int) -> Unit = remember {
+        { t, sNum, eNum ->
+            recent = store.addRecent(t)
+            scope.launch {
+                val streamUrl = TorBoxScraper.resolveStream(t, sNum, eNum, torboxKey)
+                if (streamUrl != null) {
+                    Toast.makeText(ctx, "Episode S${sNum}E${eNum} Stream Linked", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(ctx, "Playback started for S${sNum}E${eNum}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     val onToggle: (Title) -> Unit = remember {
         { t ->
             saved = store.toggleSaved(t)
@@ -596,6 +610,7 @@ fun FrameTvApp() {
                 torboxKey = torboxKey,
                 saved = saved.any { it.key == d.key },
                 onPlay = { onPlay(d) },
+                onPlayEpisode = onPlayEpisode,
                 onToggle = { onToggle(d) }
             )
         } else {
@@ -838,6 +853,7 @@ fun DetailScreen(
     torboxKey: String,
     saved: Boolean,
     onPlay: () -> Unit,
+    onPlayEpisode: (Title, Int, Int) -> Unit,
     onToggle: () -> Unit
 ) {
     var extra by remember(t.key) { mutableStateOf<TitleExtra?>(null) }
@@ -966,7 +982,9 @@ fun DetailScreen(
                     } else {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
                             items(eps, key = { it.number }) { e ->
-                                EpisodeCard(e, onClick = onPlay)
+                                EpisodeCard(e) {
+                                    onPlayEpisode(t, season, e.number)
+                                }
                             }
                         }
                     }

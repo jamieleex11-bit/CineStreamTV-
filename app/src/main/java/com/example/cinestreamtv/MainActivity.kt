@@ -628,8 +628,8 @@ fun FrameTvApp() {
                     onOpen
                 )
                 Tab.Library -> LibraryScreen(saved, recent, onOpen)
-                Tab.Settings -> SettingsScreen(store) { selectedKey ->
-                    tmdbKey = selectedKey
+                Tab.Settings -> SettingsScreen(store) { 
+                    tmdbKey = store.get("tmdb")
                     torboxKey = store.get("torbox")
                 }
             }

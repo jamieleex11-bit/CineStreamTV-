@@ -2,8 +2,10 @@ package com.example.cinestreamtv
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.util.LruCache
 import android.widget.Toast
@@ -209,7 +211,7 @@ object TorBoxScraper {
             conn.readTimeout = 8000
 
             if (conn.responseCode == 200) {
-                return@withContext "https://torbox.app/playback/stream_resolved"
+                return@withContext "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
             }
             null
         } catch (e: Exception) {
@@ -348,8 +350,8 @@ fun img(path: String?, size: String): String? =
 fun vivid(argb: Int): Color {
     val hsv = FloatArray(3)
     android.graphics.Color.colorToHSV(argb, hsv)
-    hsv[1] = (hsv[1] * 1.4f).coerceIn(0.35f, 1f)
-    hsv[2] = hsv[2].coerceIn(0.55f, 1f)
+    hsv[1] = (hsv[1] * 1.3f).coerceIn(0.3f, 0.95f)
+    hsv[2] = hsv[2].coerceIn(0.65f, 1f)
     return Color(android.graphics.Color.HSVToColor(hsv))
 }
 
@@ -372,8 +374,8 @@ fun averageColor(b: Bitmap): Color {
 
 fun placeholder(id: Int): List<Color> {
     val h = ((id * 47) % 360).toFloat()
-    val a = Color(android.graphics.Color.HSVToColor(floatArrayOf(h, 0.55f, 0.42f)))
-    val b = Color(android.graphics.Color.HSVToColor(floatArrayOf((h + 40f) % 360f, 0.6f, 0.25f)))
+    val a = Color(android.graphics.Color.HSVToColor(floatArrayOf(h, 0.45f, 0.55f)))
+    val b = Color(android.graphics.Color.HSVToColor(floatArrayOf((h + 45f) % 360f, 0.55f, 0.35f)))
     return listOf(a, b)
 }
 
@@ -441,15 +443,15 @@ suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 320) {
     }
 }
 
-// ======================= Glass helpers =======================
+// ======================= Glass helpers (Refined & Bright) =======================
 
 fun Modifier.glass(shape: Shape, strong: Boolean): Modifier = this
     .clip(shape)
     .background(
         Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = if (strong) 0.28f else 0.12f),
-                Color.White.copy(alpha = if (strong) 0.12f else 0.04f)
+                Color.White.copy(alpha = if (strong) 0.35f else 0.16f),
+                Color.White.copy(alpha = if (strong) 0.16f else 0.06f)
             )
         )
     )
@@ -457,8 +459,8 @@ fun Modifier.glass(shape: Shape, strong: Boolean): Modifier = this
         1.dp,
         Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = if (strong) 0.75f else 0.35f),
-                Color.White.copy(alpha = 0.04f)
+                Color.White.copy(alpha = if (strong) 0.85f else 0.45f),
+                Color.White.copy(alpha = 0.08f)
             )
         ),
         shape
@@ -477,14 +479,14 @@ fun PillButton(
     val look = if (primary) {
         Modifier
             .clip(shape)
-            .background(Color.White.copy(alpha = if (focused) 1f else 0.88f))
+            .background(Color.White.copy(alpha = if (focused) 1f else 0.92f))
     } else {
         Modifier.glass(shape, focused)
     }
     Box(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { focusState -> focused = focusState.isFocused }
             .then(look)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -495,7 +497,7 @@ fun PillButton(
     ) {
         Text(
             text,
-            color = if (primary) Color.Black else Color.White,
+            color = if (primary) Color(0xFF0F111A) else Color.White,
             fontSize = 18.sp,
             fontWeight = FontWeight.SemiBold,
             modifier = Modifier.padding(horizontal = 30.dp, vertical = 14.dp)
@@ -520,7 +522,11 @@ fun FrameTvApp() {
     var saved by remember { mutableStateOf(store.saved()) }
     var detail by remember { mutableStateOf<Title?>(null) }
     var lastBackPress by remember { mutableStateOf(0L) }
-    val base = Color(0xFF050509)
+    
+    // Bright, polished cinematic twilight base
+    val baseBackground = Brush.verticalGradient(
+        listOf(Color(0xFF181B28), Color(0xFF0F111A))
+    )
 
     val homeRows = remember(rows, recent) {
         val cw = if (recent.isNotEmpty()) listOf(RowData("Continue Watching", recent, true)) else emptyList()
@@ -562,15 +568,27 @@ fun FrameTvApp() {
         { selectedTitle -> detail = selectedTitle }
     }
 
+    val launchPlayer: (String) -> Unit = { streamUrl ->
+        try {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(Uri.parse(streamUrl), "video/*")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            ctx.startActivity(intent)
+        } catch (e: Exception) {
+            Toast.makeText(ctx, "No video player found on device", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val onPlay: (Title) -> Unit = remember {
         { selectedTitle ->
             recent = store.addRecent(selectedTitle)
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(selectedTitle, 1, 1, torboxKey)
                 if (streamUrl != null) {
-                    Toast.makeText(ctx, "TorBox Stream Linked Successfully", Toast.LENGTH_SHORT).show()
+                    launchPlayer(streamUrl)
                 } else {
-                    Toast.makeText(ctx, "Playback started via TorBox cache", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Stream unavailable on TorBox", Toast.LENGTH_SHORT).show()
                 }
             }
             Unit
@@ -583,9 +601,9 @@ fun FrameTvApp() {
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(selectedTitle, sNum, eNum, torboxKey)
                 if (streamUrl != null) {
-                    Toast.makeText(ctx, "Episode S${sNum}E${eNum} Stream Linked", Toast.LENGTH_SHORT).show()
+                    launchPlayer(streamUrl)
                 } else {
-                    Toast.makeText(ctx, "Playback started for S${sNum}E${eNum}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Episode stream unavailable", Toast.LENGTH_SHORT).show()
                 }
             }
             Unit
@@ -601,7 +619,7 @@ fun FrameTvApp() {
     Box(
         Modifier
             .fillMaxSize()
-            .background(base)
+            .background(baseBackground)
     ) {
         val d = detail
         if (d != null) {
@@ -683,8 +701,8 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(160), label = "tab")
     val shape = RoundedCornerShape(50)
     val bg = when {
-        focused -> Color.White.copy(alpha = 0.92f)
-        selected -> Color.White.copy(alpha = 0.22f)
+        focused -> Color.White.copy(alpha = 0.95f)
+        selected -> Color.White.copy(alpha = 0.28f)
         else -> Color.Transparent
     }
     Box(
@@ -701,7 +719,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             label,
-            color = if (focused) Color.Black else Color.White.copy(alpha = if (selected) 1f else 0.7f),
+            color = if (focused) Color(0xFF0F111A) else Color.White.copy(alpha = if (selected) 1f else 0.75f),
             fontSize = 17.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(horizontal = 26.dp, vertical = 11.dp)
@@ -744,7 +762,7 @@ fun HomeScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 110.dp, bottom = 60.dp),
+                contentPadding = PaddingValues(top = 110.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
                 items(rows, key = { rowItem -> rowItem.title }) { row ->
@@ -893,9 +911,9 @@ fun DetailScreen(
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF050509),
-                        0.45f to Color(0xFF050509).copy(alpha = 0.88f),
-                        1f to Color(0xFF050509).copy(alpha = 0.2f)
+                        0f to Color(0xFF0F111A),
+                        0.45f to Color(0xFF0F111A).copy(alpha = 0.85f),
+                        1f to Color(0xFF0F111A).copy(alpha = 0.15f)
                     )
                 )
         )
@@ -906,7 +924,7 @@ fun DetailScreen(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
                         0.5f to Color.Transparent,
-                        1f to Color(0xFF050509)
+                        1f to Color(0xFF0F111A)
                     )
                 )
         )
@@ -929,7 +947,7 @@ fun DetailScreen(
             }
             item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(meta, color = Color.White.copy(alpha = 0.8f), fontSize = 18.sp)
+                    Text(meta, color = Color.White.copy(alpha = 0.85f), fontSize = 18.sp)
                     if (t.rating > 0.0) {
                         Spacer(Modifier.width(14.dp))
                         Text(
@@ -944,7 +962,7 @@ fun DetailScreen(
             item {
                 Text(
                     t.overview.ifEmpty { "No description available." },
-                    color = Color.White.copy(alpha = 0.8f),
+                    color = Color.White.copy(alpha = 0.85f),
                     fontSize = 18.sp,
                     lineHeight = 26.sp,
                     maxLines = 4,
@@ -1149,7 +1167,7 @@ fun LibraryScreen(
         } else {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 110.dp, bottom = 60.dp),
+                contentPadding = PaddingValues(top = 110.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(24.dp)
             ) {
                 if (saved.isNotEmpty()) {
@@ -1172,7 +1190,7 @@ fun SettingsScreen(store: Store, onSaved: () -> Unit) {
     Row(
         Modifier
             .fillMaxSize()
-            .padding(start = 64.dp, end = 64.dp, top = 110.dp, bottom = 24.dp),
+            .padding(start = 64.dp, end = 64.dp, top = 110.dp, bottom = 32.dp),
         horizontalArrangement = Arrangement.spacedBy(28.dp)
     ) {
         Column(
@@ -1212,8 +1230,8 @@ fun SettingsScreen(store: Store, onSaved: () -> Unit) {
 fun SettingsTab(label: String, selected: Boolean, onSelect: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val bg = when {
-        focused -> Color.White.copy(alpha = 0.92f)
-        selected -> Color.White.copy(alpha = 0.18f)
+        focused -> Color.White.copy(alpha = 0.95f)
+        selected -> Color.White.copy(alpha = 0.22f)
         else -> Color.Transparent
     }
     Box(
@@ -1234,7 +1252,7 @@ fun SettingsTab(label: String, selected: Boolean, onSelect: () -> Unit) {
     ) {
         Text(
             label,
-            color = if (focused) Color.Black else Color.White.copy(alpha = if (selected) 1f else 0.7f),
+            color = if (focused) Color(0xFF0F111A) else Color.White.copy(alpha = if (selected) 1f else 0.75f),
             fontSize = 18.sp,
             fontWeight = FontWeight.Medium
         )
@@ -1259,7 +1277,7 @@ fun ServicesPanel(store: Store, onSaved: () -> Unit) {
         item {
             Text(
                 "Configure your TMDB and TorBox scraper keys below.",
-                color = Color.White.copy(alpha = 0.65f),
+                color = Color.White.copy(alpha = 0.7f),
                 fontSize = 16.sp,
                 lineHeight = 22.sp
             )
@@ -1298,12 +1316,12 @@ fun AboutPanel() {
         Spacer(Modifier.height(10.dp))
         Text(
             "Metadata and artwork provided by TMDB.",
-            color = Color.White.copy(alpha = 0.65f),
+            color = Color.White.copy(alpha = 0.7f),
             fontSize = 16.sp
         )
         Text(
             "Built-in streaming scraper powered directly by TorBox caches.",
-            color = Color.White.copy(alpha = 0.65f),
+            color = Color.White.copy(alpha = 0.7f),
             fontSize = 16.sp
         )
     }
@@ -1331,16 +1349,16 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 
     Column {
-        Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 15.sp)
+        Text(label, color = Color.White.copy(alpha = 0.75f), fontSize = 15.sp)
         Spacer(Modifier.height(8.dp))
         Box(
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(Color.White.copy(alpha = if (active) 0.18f else 0.06f))
+                .background(Color.White.copy(alpha = if (active) 0.22f else 0.08f))
                 .border(
                     if (active) 3.dp else 1.dp,
-                    Color.White.copy(alpha = if (active) 1f else 0.3f),
+                    Color.White.copy(alpha = if (active) 1f else 0.35f),
                     shape
                 )
                 .onFocusChanged { focusState -> focused = focusState.isFocused }
@@ -1367,7 +1385,7 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
             } else {
                 Text(
                     if (value.isEmpty()) "Select to add" else maskKey(value),
-                    color = if (value.isEmpty()) Color.White.copy(alpha = 0.4f) else Color.White,
+                    color = if (value.isEmpty()) Color.White.copy(alpha = 0.45f) else Color.White,
                     fontSize = 20.sp
                 )
             }

@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -1195,7 +1196,7 @@ fun ServicesPanel(store: Store, onSaved: (String) -> Unit) {
         }
         item {
             Text(
-                "Paste each key once. They're saved on this device only. Press select on a box to type.",
+                "Select a box to type your key. Press Done or back when you're finished.",
                 color = Color.White.copy(alpha = 0.65f),
                 fontSize = 16.sp,
                 lineHeight = 23.sp
@@ -1252,17 +1253,26 @@ fun AboutPanel() {
     }
 }
 
-// Tap/select to start typing. Remote scrolling is never trapped by a text field.
+// Select once to type. Done or back closes the keyboard and returns to scrolling.
 @Composable
 fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     var editing by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     val focusReq = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val shape = RoundedCornerShape(22.dp)
+    val active = focused || editing
 
     BackHandler(enabled = editing) { editing = false }
 
     LaunchedEffect(editing) {
-        if (editing) runCatching { focusReq.requestFocus() }
+        if (editing) {
+            delay(120)
+            runCatching { focusReq.requestFocus() }
+            keyboard?.show()
+        } else {
+            keyboard?.hide()
+        }
     }
 
     Column {
@@ -1271,12 +1281,18 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
         Box(
             Modifier
                 .fillMaxWidth()
-                .glass(RoundedCornerShape(22.dp), focused || editing)
+                .clip(shape)
+                .background(Color.White.copy(alpha = if (active) 0.18f else 0.06f))
+                .border(
+                    if (active) 3.dp else 1.dp,
+                    Color.White.copy(alpha = if (active) 1f else 0.3f),
+                    shape
+                )
                 .onFocusChanged { focused = it.isFocused }
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = { editing = true }
+                    onClick = { if (!editing) editing = true }
                 )
                 .padding(horizontal = 24.dp, vertical = 18.dp)
         ) {
@@ -1292,7 +1308,6 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focusReq)
-                        .onFocusChanged { if (!it.isFocused) editing = false }
                 )
             } else {
                 Text(

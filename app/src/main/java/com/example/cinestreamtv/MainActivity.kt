@@ -88,6 +88,18 @@ private val NetGreen = Color(0xFF34D399)
 
 private val Screens = listOf("Watch Now", "Channels", "TV Shows", "Movies", "Library", "Settings")
 
+// ───────────────────────────── Google TV 10-Foot & Leanback Design Constants ─────────────────────────────
+// Rule 3: 5% Overscan Margin Protection (Safe Action & Title Boundary for TV panels)
+private val TvOverscanHorizontal = 58.dp
+private val TvOverscanVertical = 36.dp
+
+// Rule 1: 10-Foot UI Scaling Dimensions (Legible and interactable from 10 feet on a couch)
+private val CardPosterWidth = 185.dp
+private val CardPosterHeight = 275.dp
+private val CardWideWidth = 320.dp
+private val CardWideHeight = 180.dp
+private val TvButtonHeight = 56.dp
+
 // ───────────────────────────── Models ─────────────────────────────
 
 data class Film(
@@ -1026,81 +1038,108 @@ private fun FrameTopNavBar(current: String, onSelect: (String) -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 48.dp, vertical = 18.dp),
+            .padding(horizontal = TvOverscanHorizontal, vertical = TvOverscanVertical / 2),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(22.dp)
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // Frame TV Liquid Glass Aperture Logo
+            // Frame TV Liquid Glass Aperture Logo (10-Foot Prominence)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(14.dp))
                     .background(Color(0x28FFFFFF))
-                    .border(BorderStroke(1.dp, Color(0x38FFFFFF)), RoundedCornerShape(12.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .border(BorderStroke(1.dp, Color(0x38FFFFFF)), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
                     text = "FRAME",
                     color = NetWhite,
-                    fontSize = 18.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 2.sp
                 )
                 Text(
                     text = "tv",
                     color = FrameCyan,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Black
                 )
             }
 
-            // Floating Liquid Glass Navigation Capsule (White active bubble, no-jank remote)
+            // Floating Liquid Glass Navigation Capsule (D-Pad Focusable, White Active Halo)
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(50.dp))
                     .background(Color(0x22FFFFFF))
                     .border(BorderStroke(1.dp, Color(0x33FFFFFF)), RoundedCornerShape(50.dp))
                     .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Screens.forEach { screen ->
                     val isSelected = current == screen
+                    var isFocused by remember { mutableStateOf(false) }
+
                     Box(
                         modifier = Modifier
+                            .graphicsLayer {
+                                scaleX = if (isFocused) 1.10f else 1.0f
+                                scaleY = if (isFocused) 1.10f else 1.0f
+                            }
                             .clip(RoundedCornerShape(50.dp))
-                            .background(if (isSelected) NetWhite else Color.Transparent)
+                            .background(
+                                when {
+                                    isFocused -> NetWhite
+                                    isSelected -> NetWhite.copy(alpha = 0.95f)
+                                    else -> Color.Transparent
+                                }
+                            )
+                            .border(
+                                width = if (isFocused) 3.dp else 1.dp,
+                                color = if (isFocused) FrameCyan else Color.Transparent,
+                                shape = RoundedCornerShape(50.dp)
+                            )
+                            .focusable()
+                            .onFocusChanged { isFocused = it.isFocused }
                             .clickable { onSelect(screen) }
-                            .padding(horizontal = 18.dp, vertical = 7.dp)
+                            .padding(horizontal = 20.dp, vertical = 9.dp)
                     ) {
                         Text(
                             text = screen,
-                            color = if (isSelected) Color.Black else NetWhite.copy(alpha = 0.85f),
-                            fontSize = 13.sp,
-                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold
+                            color = if (isFocused || isSelected) Color.Black else NetWhite.copy(alpha = 0.85f),
+                            fontSize = 14.sp,
+                            fontWeight = if (isFocused || isSelected) FontWeight.Black else FontWeight.SemiBold
                         )
                     }
                 }
             }
         }
 
-        // Apple TV Liquid Glass Search Pill
+        // Apple TV Liquid Glass Search Pill (Remote Focusable)
+        var searchFocused by remember { mutableStateOf(false) }
         Surface(
             shape = RoundedCornerShape(50.dp),
-            color = if (current == "Search") NetWhite else Color(0x22FFFFFF),
-            border = BorderStroke(1.dp, if (current == "Search") NetWhite else Color(0x33FFFFFF)),
-            modifier = Modifier.clickable { onSelect("Search") }
+            color = if (searchFocused || current == "Search") NetWhite else Color(0x22FFFFFF),
+            border = BorderStroke(if (searchFocused) 3.dp else 1.dp, if (searchFocused) FrameCyan else if (current == "Search") NetWhite else Color(0x33FFFFFF)),
+            modifier = Modifier
+                .graphicsLayer {
+                    scaleX = if (searchFocused) 1.10f else 1.0f
+                    scaleY = if (searchFocused) 1.10f else 1.0f
+                }
+                .focusable()
+                .onFocusChanged { searchFocused = it.isFocused }
+                .clickable { onSelect("Search") }
         ) {
             Text(
                 text = "🔍 Search",
-                color = if (current == "Search") Color.Black else NetWhite,
-                fontSize = 13.sp,
+                color = if (searchFocused || current == "Search") Color.Black else NetWhite,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 7.dp)
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 9.dp)
             )
         }
     }
@@ -1127,9 +1166,10 @@ private fun NetflixHomeScreen(
 
     val hero = state.catalog.first()
 
+    // Leanback Vertical Scroll Container with 5% Overscan Bottom Margin
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = 48.dp)
+        contentPadding = PaddingValues(bottom = TvOverscanVertical)
     ) {
         item(key = "hero_billboard") {
             HeroBanner(
@@ -1143,17 +1183,18 @@ private fun NetflixHomeScreen(
 
         if (state.resume.isNotEmpty()) {
             item(key = "continue_watching") {
-                Column(Modifier.padding(vertical = 12.dp)) {
+                Column(Modifier.padding(vertical = 14.dp)) {
                     Text(
                         "Continue Watching for Jamie",
-                        fontSize = 20.sp,
+                        fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                         color = NetWhite,
-                        modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+                        modifier = Modifier.padding(start = TvOverscanHorizontal, bottom = 10.dp)
                     )
+                    // Rule 4: Leanback Horizontal Scroll with 5% Overscan Safe Padding
                     LazyRow(
-                        contentPadding = PaddingValues(horizontal = 48.dp),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(horizontal = TvOverscanHorizontal),
+                        horizontalArrangement = Arrangement.spacedBy(20.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         items(state.resume, key = { it.key }) { res ->
@@ -1194,7 +1235,7 @@ private fun HeroBanner(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(520.dp)
+            .height(560.dp)
     ) {
         if (art.isNotBlank()) {
             AsyncImage(
@@ -1205,7 +1246,7 @@ private fun HeroBanner(
             )
         }
 
-        // Authentic 3-layer Netflix gradient vignettes
+        // 3-layer cinematic gradient vignettes for 10-foot couch readability
         // 1. Bottom-up dark fade
         Box(
             Modifier
@@ -1225,15 +1266,15 @@ private fun HeroBanner(
                 .background(Brush.verticalGradient(listOf(NetBlack.copy(alpha = 0.75f), Color.Transparent), endY = 160f))
         )
 
-        // Billboard Content matching Web Netflix Hero Exactly
+        // Billboard Content: Aligned with 5% Overscan Safe Margins
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 48.dp, bottom = 44.dp)
-                .width(680.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(start = TvOverscanHorizontal, bottom = TvOverscanVertical)
+                .width(720.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Frame TV Brand + Kind + Resonance
+            // Frame TV Brand + Kind Badges
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1246,48 +1287,48 @@ private fun HeroBanner(
                     Text(
                         text = " tv+ ORIGINAL",
                         color = NetWhite,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
                     )
                 }
-                Text("•", color = NetMuted, fontSize = 11.sp)
+                Text("•", color = NetMuted, fontSize = 12.sp)
                 Text(
                     text = if (film.kind == "Series") "Apple Original Series" else "Feature Film",
                     color = NetMuted,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
 
-            // Giant Billboard Title
+            // Rule 1: 10-Foot UI Scaling Headline (48sp)
             Text(
                 text = film.name,
-                fontSize = 44.sp,
+                fontSize = 48.sp,
                 fontWeight = FontWeight.Black,
                 color = NetWhite,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
 
-            // Authentic Metadata Badges Row (Matches Web Hero)
+            // Metadata Badges Row (10-Foot Couch Scale)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (film.rating.isNotBlank()) {
                     Text(
                         text = "★ " + film.rating,
                         color = NetGreen,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
                 Text(
                     text = film.year.ifBlank { "2024" },
                     color = NetMuted,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Surface(
@@ -1297,16 +1338,16 @@ private fun HeroBanner(
                 ) {
                     Text(
                         text = "TV-MA",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = NetWhite,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
                 Text(
                     text = if (film.kind == "Series") "2 Seasons" else "2h 15m",
                     color = NetWhite,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Surface(
@@ -1316,10 +1357,10 @@ private fun HeroBanner(
                 ) {
                     Text(
                         text = "Ultra HD 4K",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = NetWhite,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
                 Surface(
@@ -1329,10 +1370,10 @@ private fun HeroBanner(
                 ) {
                     Text(
                         text = "HDR",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = NetWhite,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
                 Surface(
@@ -1342,61 +1383,62 @@ private fun HeroBanner(
                 ) {
                     Text(
                         text = "5.1 Spatial Audio",
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = JamieGold,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
             }
 
-            // Overview Synopsis
+            // Overview Synopsis (16sp Legible from 10 feet)
             Text(
                 text = film.overview,
-                fontSize = 14.sp,
-                color = NetWhite.copy(alpha = 0.88f),
+                fontSize = 16.sp,
+                color = NetWhite.copy(alpha = 0.90f),
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
-                lineHeight = 20.sp
+                lineHeight = 24.sp
             )
 
-            // Apple TV Liquid Glass Action Buttons Row (Pure White Glossy Play, Translucent Glass More Info, Squircle My List)
+            // Rule 2: D-Pad Focus States on Large 56dp Action Buttons
             Row(
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(top = 8.dp)
+                modifier = Modifier.padding(top = 10.dp)
             ) {
-                // Pure Glossy White Apple TV Play Button
+                // Pure Glossy White Apple TV Play Button (TvButtonHeight = 56dp)
                 Button(
                     onClick = onPlay,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = NetWhite,
                         contentColor = Color.Black
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
-                        .height(52.dp)
+                        .height(TvButtonHeight)
+                        .focusable()
                         .onFocusChanged { playFocused = it.isFocused }
                         .graphicsLayer {
-                            scaleX = if (playFocused) 1.06f else 1.0f
-                            scaleY = if (playFocused) 1.06f else 1.0f
+                            scaleX = if (playFocused) 1.08f else 1.0f
+                            scaleY = if (playFocused) 1.08f else 1.0f
                         }
                         .border(
-                            width = if (playFocused) 3.dp else 0.dp,
+                            width = if (playFocused) 3.5.dp else 0.dp,
                             color = if (playFocused) FrameCyan else Color.Transparent,
-                            shape = RoundedCornerShape(14.dp)
+                            shape = RoundedCornerShape(16.dp)
                         ),
-                    contentPadding = PaddingValues(horizontal = 28.dp)
+                    contentPadding = PaddingValues(horizontal = 32.dp)
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("▶", fontSize = 16.sp, color = Color.Black)
+                        Text("▶", fontSize = 18.sp, color = Color.Black)
                         Text(
                             text = "Play",
                             fontWeight = FontWeight.Black,
-                            fontSize = 16.sp,
+                            fontSize = 18.sp,
                             color = Color.Black
                         )
                     }
@@ -1409,30 +1451,31 @@ private fun HeroBanner(
                         containerColor = Color(0x33FFFFFF),
                         contentColor = NetWhite
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
-                        .height(52.dp)
+                        .height(TvButtonHeight)
+                        .focusable()
                         .onFocusChanged { infoFocused = it.isFocused }
                         .graphicsLayer {
-                            scaleX = if (infoFocused) 1.06f else 1.0f
-                            scaleY = if (infoFocused) 1.06f else 1.0f
+                            scaleX = if (infoFocused) 1.08f else 1.0f
+                            scaleY = if (infoFocused) 1.08f else 1.0f
                         }
                         .border(
-                            width = if (infoFocused) 3.dp else 1.dp,
+                            width = if (infoFocused) 3.5.dp else 1.dp,
                             color = if (infoFocused) NetWhite else Color(0x44FFFFFF),
-                            shape = RoundedCornerShape(14.dp)
+                            shape = RoundedCornerShape(16.dp)
                         ),
-                    contentPadding = PaddingValues(horizontal = 22.dp)
+                    contentPadding = PaddingValues(horizontal = 26.dp)
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("ℹ", fontSize = 16.sp, color = NetWhite)
+                        Text("ℹ", fontSize = 18.sp, color = NetWhite)
                         Text(
                             text = "Details",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
+                            fontSize = 16.sp,
                             color = NetWhite
                         )
                     }
@@ -1445,30 +1488,31 @@ private fun HeroBanner(
                         containerColor = if (isInWatchlist) NetWhite else Color(0x22FFFFFF),
                         contentColor = if (isInWatchlist) Color.Black else NetWhite
                     ),
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     modifier = Modifier
-                        .height(52.dp)
+                        .height(TvButtonHeight)
+                        .focusable()
                         .onFocusChanged { listFocused = it.isFocused }
                         .graphicsLayer {
-                            scaleX = if (listFocused) 1.06f else 1.0f
-                            scaleY = if (listFocused) 1.06f else 1.0f
+                            scaleX = if (listFocused) 1.08f else 1.0f
+                            scaleY = if (listFocused) 1.08f else 1.0f
                         }
                         .border(
-                            width = if (listFocused) 3.dp else 1.dp,
+                            width = if (listFocused) 3.5.dp else 1.dp,
                             color = if (listFocused) NetWhite else Color(0x33FFFFFF),
-                            shape = RoundedCornerShape(14.dp)
+                            shape = RoundedCornerShape(16.dp)
                         ),
-                    contentPadding = PaddingValues(horizontal = 20.dp)
+                    contentPadding = PaddingValues(horizontal = 24.dp)
                 ) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(if (isInWatchlist) "✓" else "+", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text(if (isInWatchlist) "✓" else "+", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Text(
                             text = if (isInWatchlist) "In Frame List" else "Add to List",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                            fontSize = 15.sp
                         )
                     }
                 }
@@ -1485,18 +1529,19 @@ private fun Shelf(
     ranked: Boolean = false
 ) {
     if (films.isEmpty()) return
-    Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 14.dp)) {
+        // Rule 3: 5% Overscan Safe Title Padding
         Text(
             text = title,
-            fontSize = 20.sp,
+            fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             color = NetWhite,
-            modifier = Modifier.padding(start = 48.dp, bottom = 8.dp)
+            modifier = Modifier.padding(start = TvOverscanHorizontal, bottom = 12.dp)
         )
-        // High-performance LazyRow with stable keys and smooth spacing
+        // Rule 4: Leanback Horizontal Scrolling LazyRow with Overscan Padding
         LazyRow(
-            contentPadding = PaddingValues(horizontal = 48.dp),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            contentPadding = PaddingValues(horizontal = TvOverscanHorizontal),
+            horizontalArrangement = Arrangement.spacedBy(20.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
             itemsIndexed(films, key = { _, f -> f.id }) { index, film ->
@@ -1516,21 +1561,23 @@ private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val network = film.getEffectiveNetwork()
 
-    // GPU-accelerated graphicsLayer scaling eliminates CPU layout invalidations on TV remotes!
+    // Rule 1: 10-Foot UI Scaling (CardPosterWidth = 185dp, CardPosterHeight = 275dp)
+    // Rule 2: D-Pad Focus States (1.10x scale + glowing 3.5dp white border + elevation)
     Box(
         modifier = Modifier
-            .width(160.dp)
-            .height(240.dp)
+            .width(CardPosterWidth)
+            .height(CardPosterHeight)
+            .focusable()
             .onFocusChanged { focused = it.isFocused }
             .graphicsLayer {
-                scaleX = if (focused) 1.07f else 1.0f
-                scaleY = if (focused) 1.07f else 1.0f
+                scaleX = if (focused) 1.10f else 1.0f
+                scaleY = if (focused) 1.10f else 1.0f
             }
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
             .border(
-                width = if (focused) 3.dp else 1.dp,
+                width = if (focused) 3.5.dp else 1.dp,
                 color = if (focused) NetWhite else Color(0x28FFFFFF),
-                shape = RoundedCornerShape(18.dp)
+                shape = RoundedCornerShape(20.dp)
             )
             .background(NetDarkGray)
             .clickable(onClick = onClick)
@@ -1549,8 +1596,8 @@ private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .size(24.dp)
+                    .padding(10.dp)
+                    .size(28.dp)
                     .clip(RoundedCornerShape(50.dp))
                     .background(NetWhite)
                     .border(1.dp, Color(0x33000000), RoundedCornerShape(50.dp)),
@@ -1558,7 +1605,7 @@ private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
             ) {
                 Text(
                     text = rank.toString(),
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Black,
                     color = Color.Black
                 )
@@ -1569,7 +1616,7 @@ private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(8.dp)
+                .padding(10.dp)
                 .background(
                     when (network) {
                         "Disney+" -> Color(0xEE06122C)
@@ -1593,7 +1640,7 @@ private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
                     },
                     RoundedCornerShape(8.dp)
                 )
-                .padding(horizontal = 7.dp, vertical = 3.dp)
+                .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
             Text(
                 text = when (network) {
@@ -1604,7 +1651,7 @@ private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
                     "Paramount+" -> "P+"
                     else -> "N"
                 },
-                fontSize = 9.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.Black,
                 color = when (network) {
                     "Prime Video" -> Color(0xFF38BDF8)
@@ -1614,21 +1661,21 @@ private fun PosterCard(film: Film, rank: Int? = null, onClick: () -> Unit) {
             )
         }
 
-        // Bottom Details
+        // Bottom Details (10-Foot Couch Legible Typography)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE000000))))
-                .padding(6.dp)
+                .background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xF0000000))))
+                .padding(8.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(film.name, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = NetWhite, maxLines = 1)
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(film.name, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = NetWhite, maxLines = 1)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (film.rating.isNotBlank()) {
-                        Text("★ " + film.rating, fontSize = 10.sp, color = NetGreen, fontWeight = FontWeight.Bold)
+                        Text("★ " + film.rating, fontSize = 11.sp, color = NetGreen, fontWeight = FontWeight.Bold)
                     }
-                    Text("• " + network, fontSize = 9.sp, color = NetMuted, maxLines = 1)
+                    Text("• " + network, fontSize = 10.sp, color = NetMuted, maxLines = 1)
                 }
             }
         }
@@ -1640,20 +1687,23 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
     val progress = if (resume.durationMs > 0L) (resume.positionMs.toFloat() / resume.durationMs).coerceIn(0f, 1f) else 0f
     var focused by remember { mutableStateOf(false) }
 
+    // Rule 1: 10-Foot UI Scaling (CardWideWidth = 320dp, CardWideHeight = 180dp)
+    // Rule 2: D-Pad Focus States (1.08x scale + 3.5dp white border)
     Box(
         modifier = Modifier
-            .width(280.dp)
-            .height(160.dp)
+            .width(CardWideWidth)
+            .height(CardWideHeight)
+            .focusable()
             .onFocusChanged { focused = it.isFocused }
             .graphicsLayer {
-                scaleX = if (focused) 1.04f else 1.0f
-                scaleY = if (focused) 1.04f else 1.0f
+                scaleX = if (focused) 1.08f else 1.0f
+                scaleY = if (focused) 1.08f else 1.0f
             }
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(18.dp))
             .border(
-                width = if (focused) 3.dp else 1.dp,
+                width = if (focused) 3.5.dp else 1.dp,
                 color = if (focused) NetWhite else Color(0x22FFFFFF),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(18.dp)
             )
             .background(NetDarkGray)
             .clickable(onClick = onClick)
@@ -1661,12 +1711,12 @@ private fun ResumeCard(resume: Resume, onClick: () -> Unit) {
         if (resume.image.isNotBlank()) {
             AsyncImage(model = resume.image, contentDescription = resume.name, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         }
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xDD000000)))))
+        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color(0xEE000000)))))
 
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(resume.name, fontSize = 13.sp, color = NetWhite, fontWeight = FontWeight.Bold, maxLines = 1)
-            Text(remainingLabel(resume.positionMs, resume.durationMs), fontSize = 11.sp, color = NetMuted)
-            Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50.dp)).background(Color(0x33FFFFFF))) {
+        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(resume.name, fontSize = 15.sp, color = NetWhite, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text(remainingLabel(resume.positionMs, resume.durationMs), fontSize = 12.sp, color = NetMuted)
+            Box(Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(50.dp)).background(Color(0x33FFFFFF))) {
                 Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(NetWhite))
             }
         }
@@ -1687,34 +1737,44 @@ private fun CatalogGridScreen(
         else films.filter { it.getEffectiveNetwork() == selectedStudio }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 16.dp)) {
+    // Rule 3: 5% Overscan Margin Protection
+    Column(Modifier.fillMaxSize().padding(horizontal = TvOverscanHorizontal, vertical = TvOverscanVertical / 2)) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(title, fontSize = 28.sp, fontWeight = FontWeight.Black, color = NetWhite)
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, fontSize = 32.sp, fontWeight = FontWeight.Black, color = NetWhite)
                 Text(
                     text = "Frame Studios Hub • " + (if (selectedStudio == "ALL") "Frame Pass (All 6 Studios Unified)" else selectedStudio) + " (" + filteredFilms.size + " titles)",
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     color = NetMuted
                 )
             }
         }
 
-        // Apple TV Liquid Glass Platform Filter Bubble Pills
+        // Apple TV Liquid Glass Platform Filter Bubble Pills (Remote Focusable)
         LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(bottom = 16.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.padding(bottom = 18.dp)
         ) {
             items(studios) { studio ->
                 val isSelected = selectedStudio == studio
+                var isFocused by remember { mutableStateOf(false) }
+
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = if (isSelected) NetWhite else Color(0x28FFFFFF),
-                    border = BorderStroke(1.dp, if (isSelected) NetWhite else Color(0x38FFFFFF)),
-                    modifier = Modifier.clickable { selectedStudio = studio }
+                    shape = RoundedCornerShape(24.dp),
+                    color = if (isFocused || isSelected) NetWhite else Color(0x28FFFFFF),
+                    border = BorderStroke(if (isFocused) 3.dp else 1.dp, if (isFocused) FrameCyan else if (isSelected) NetWhite else Color(0x38FFFFFF)),
+                    modifier = Modifier
+                        .graphicsLayer {
+                            scaleX = if (isFocused) 1.08f else 1.0f
+                            scaleY = if (isFocused) 1.08f else 1.0f
+                        }
+                        .focusable()
+                        .onFocusChanged { isFocused = it.isFocused }
+                        .clickable { selectedStudio = studio }
                 ) {
                     Text(
                         text = when (studio) {
@@ -1726,10 +1786,10 @@ private fun CatalogGridScreen(
                             "Paramount+" -> "Paramount+"
                             else -> "Netflix Originals"
                         },
-                        fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
-                        color = if (isSelected) Color.Black else NetWhite,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        fontSize = 13.sp,
+                        fontWeight = if (isFocused || isSelected) FontWeight.Black else FontWeight.Bold,
+                        color = if (isFocused || isSelected) Color.Black else NetWhite,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 9.dp)
                     )
                 }
             }
@@ -1737,13 +1797,15 @@ private fun CatalogGridScreen(
 
         if (filteredFilms.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No titles from " + selectedStudio + " yet.", color = NetMuted, fontSize = 16.sp)
+                Text("No titles from " + selectedStudio + " yet.", color = NetMuted, fontSize = 18.sp)
             }
         } else {
+            // Rule 1 & Rule 4: Adaptive Grid using Couch-scaled CardPosterWidth (185dp)
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(150.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                columns = GridCells.Adaptive(CardPosterWidth),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = TvOverscanVertical)
             ) {
                 items(filteredFilms, key = { it.id }) { film ->
                     PosterCard(film = film, onClick = { onOpen(film) })
@@ -1759,28 +1821,49 @@ private fun SearchScreen(
     onQueryChange: (String) -> Unit,
     onOpen: (Film) -> Unit
 ) {
-    Column(Modifier.fillMaxSize().padding(horizontal = 48.dp, vertical = 16.dp)) {
+    var searchFieldFocused by remember { mutableStateOf(false) }
+
+    // Rule 3: 5% Overscan Protection
+    Column(Modifier.fillMaxSize().padding(horizontal = TvOverscanHorizontal, vertical = TvOverscanVertical / 2)) {
         OutlinedTextField(
             value = state.query,
             onValueChange = onQueryChange,
             singleLine = true,
-            label = { Text("Search movies, TV series, actors...") },
-            shape = RoundedCornerShape(8.dp),
+            label = { Text("Search movies, TV series, actors...", fontSize = 14.sp) },
+            shape = RoundedCornerShape(12.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = NetWhite,
                 unfocusedTextColor = NetWhite,
-                focusedBorderColor = NetWhite,
+                focusedBorderColor = FrameCyan,
                 unfocusedBorderColor = Color(0x44FFFFFF),
                 focusedContainerColor = NetDarkGray,
                 unfocusedContainerColor = NetDarkGray
             ),
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusable()
+                .onFocusChanged { searchFieldFocused = it.isFocused }
+                .graphicsLayer {
+                    scaleX = if (searchFieldFocused) 1.02f else 1.0f
+                    scaleY = if (searchFieldFocused) 1.02f else 1.0f
+                }
+                .border(
+                    width = if (searchFieldFocused) 3.dp else 1.dp,
+                    color = if (searchFieldFocused) FrameCyan else Color(0x44FFFFFF),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                .padding(bottom = 18.dp)
         )
 
         when {
             state.isSearching -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = NetRed) }
-            state.results.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Search movies and TV shows.", color = NetMuted, fontSize = 16.sp) }
-            else -> LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            state.results.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Search movies and TV shows.", color = NetMuted, fontSize = 18.sp) }
+            else -> LazyVerticalGrid(
+                columns = GridCells.Adaptive(CardPosterWidth),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                contentPadding = PaddingValues(bottom = TvOverscanVertical)
+            ) {
                 items(state.results, key = { it.id }) { film ->
                     PosterCard(film = film, onClick = { onOpen(film) })
                 }
@@ -1801,6 +1884,9 @@ private fun DetailsScreen(
     onPickFile: (TbFile, Long) -> Unit
 ) {
     val film = state.film ?: return
+    var playFocused by remember { mutableStateOf(false) }
+    var torboxFocused by remember { mutableStateOf(false) }
+    var listFocused by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize().background(NetBlack)) {
         if (film.backdrop.isNotBlank()) {
@@ -1808,59 +1894,125 @@ private fun DetailsScreen(
         }
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(NetBlack, NetBlack.copy(alpha = 0.9f), NetBlack.copy(alpha = 0.4f)))))
 
+        // Rule 3: 5% Overscan Safe Margin Padding
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 48.dp, vertical = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+                .padding(horizontal = TvOverscanHorizontal, vertical = TvOverscanVertical),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            Text(film.name, fontSize = 40.sp, fontWeight = FontWeight.Black, color = NetWhite)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (film.rating.isNotBlank()) Text("★ " + film.rating, color = NetGreen, fontWeight = FontWeight.Bold)
-                Text(film.year, color = NetWhite)
-                Text(film.kind, color = NetMuted)
+            // Rule 1: 10-Foot UI Scaling Title
+            Text(film.name, fontSize = 44.sp, fontWeight = FontWeight.Black, color = NetWhite)
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (film.rating.isNotBlank()) Text("★ " + film.rating, color = NetGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(film.year, color = NetWhite, fontSize = 15.sp)
+                Text(film.kind, color = NetMuted, fontSize = 15.sp)
             }
-            Text(film.overview, fontSize = 14.sp, color = NetWhite, modifier = Modifier.width(600.dp), maxLines = 4)
+            Text(film.overview, fontSize = 16.sp, color = NetWhite.copy(alpha = 0.90f), modifier = Modifier.width(680.dp), maxLines = 4, lineHeight = 24.sp)
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Rule 2: Large 56dp Action Buttons with Glowing Focus Halos
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Button(
                     onClick = { onPlay(state.resumePositionMs) },
-                    colors = ButtonDefaults.buttonColors(containerColor = NetWhite, contentColor = Color.Black)
+                    colors = ButtonDefaults.buttonColors(containerColor = NetWhite, contentColor = Color.Black),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .height(TvButtonHeight)
+                        .focusable()
+                        .onFocusChanged { playFocused = it.isFocused }
+                        .graphicsLayer {
+                            scaleX = if (playFocused) 1.08f else 1.0f
+                            scaleY = if (playFocused) 1.08f else 1.0f
+                        }
+                        .border(
+                            width = if (playFocused) 3.5.dp else 0.dp,
+                            color = if (playFocused) FrameCyan else Color.Transparent,
+                            shape = RoundedCornerShape(16.dp)
+                        ),
+                    contentPadding = PaddingValues(horizontal = 28.dp)
                 ) {
-                    Text(if (state.resumePositionMs > 5000L) "Resume" else "Play", fontWeight = FontWeight.Bold)
+                    Text(if (state.resumePositionMs > 5000L) "Resume" else "Play", fontWeight = FontWeight.Black, fontSize = 16.sp)
                 }
 
                 Button(
                     onClick = onFindFiles,
-                    colors = ButtonDefaults.buttonColors(containerColor = NetDarkGray, contentColor = NetWhite)
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0x33FFFFFF), contentColor = NetWhite),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .height(TvButtonHeight)
+                        .focusable()
+                        .onFocusChanged { torboxFocused = it.isFocused }
+                        .graphicsLayer {
+                            scaleX = if (torboxFocused) 1.08f else 1.0f
+                            scaleY = if (torboxFocused) 1.08f else 1.0f
+                        }
+                        .border(
+                            width = if (torboxFocused) 3.5.dp else 1.dp,
+                            color = if (torboxFocused) NetWhite else Color(0x44FFFFFF),
+                            shape = RoundedCornerShape(16.dp)
+                        ),
+                    contentPadding = PaddingValues(horizontal = 24.dp)
                 ) {
-                    Text("Find in TorBox")
+                    Text("Find in TorBox", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
 
                 Button(
                     onClick = onToggleWatchlist,
-                    colors = ButtonDefaults.buttonColors(containerColor = NetDarkGray, contentColor = NetWhite)
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isInWatchlist) NetWhite else Color(0x22FFFFFF),
+                        contentColor = if (isInWatchlist) Color.Black else NetWhite
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .height(TvButtonHeight)
+                        .focusable()
+                        .onFocusChanged { listFocused = it.isFocused }
+                        .graphicsLayer {
+                            scaleX = if (listFocused) 1.08f else 1.0f
+                            scaleY = if (listFocused) 1.08f else 1.0f
+                        }
+                        .border(
+                            width = if (listFocused) 3.5.dp else 1.dp,
+                            color = if (listFocused) NetWhite else Color(0x33FFFFFF),
+                            shape = RoundedCornerShape(16.dp)
+                        ),
+                    contentPadding = PaddingValues(horizontal = 24.dp)
                 ) {
-                    Text(if (isInWatchlist) "In My List" else "+ My List")
+                    Text(if (isInWatchlist) "In My List" else "+ My List", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
             }
 
             if (state.matches.isNotEmpty()) {
-                Text("TorBox Streams", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = NetWhite)
+                Text("TorBox Streams", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = NetWhite)
                 state.matches.forEach { file ->
+                    var fileFocused by remember { mutableStateOf(false) }
                     Button(
                         onClick = { onPickFile(file, state.resumePositionMs) },
                         colors = ButtonDefaults.buttonColors(containerColor = NetCardBg, contentColor = NetWhite),
-                        modifier = Modifier.fillMaxWidth()
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .focusable()
+                            .onFocusChanged { fileFocused = it.isFocused }
+                            .graphicsLayer {
+                                scaleX = if (fileFocused) 1.04f else 1.0f
+                                scaleY = if (fileFocused) 1.04f else 1.0f
+                            }
+                            .border(
+                                width = if (fileFocused) 3.dp else 1.dp,
+                                color = if (fileFocused) FrameCyan else Color(0x22FFFFFF),
+                                shape = RoundedCornerShape(12.dp)
+                            )
                     ) {
-                        Text(file.name + " (" + formatFileSize(file.size) + ")", maxLines = 1)
+                        Text(file.name + " (" + formatFileSize(file.size) + ")", maxLines = 1, fontSize = 14.sp)
                     }
                 }
             }
 
             if (film.kind == "Series" && state.episodes.isNotEmpty()) {
-                Text("Episodes", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = NetWhite)
+                Text("Episodes", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = NetWhite)
                 state.episodes.forEach { ep ->
                     EpisodeRow(ep) { onPlayEpisode(ep) }
                 }
@@ -1871,23 +2023,36 @@ private fun DetailsScreen(
 
 @Composable
 private fun EpisodeRow(episode: Episode, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(90.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(100.dp)
+            .focusable()
+            .onFocusChanged { focused = it.isFocused }
+            .graphicsLayer {
+                scaleX = if (focused) 1.04f else 1.0f
+                scaleY = if (focused) 1.04f else 1.0f
+            }
+            .clip(RoundedCornerShape(12.dp))
+            .border(
+                width = if (focused) 3.dp else 1.dp,
+                color = if (focused) NetWhite else Color(0x28FFFFFF),
+                shape = RoundedCornerShape(12.dp)
+            )
             .background(NetDarkGray)
             .clickable(onClick = onClick)
-            .padding(8.dp),
+            .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+        horizontalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         if (episode.still.isNotBlank()) {
-            AsyncImage(model = episode.still, contentDescription = episode.name, modifier = Modifier.width(130.dp).fillMaxHeight().clip(RoundedCornerShape(6.dp)), contentScale = ContentScale.Crop)
+            AsyncImage(model = episode.still, contentDescription = episode.name, modifier = Modifier.width(140.dp).fillMaxHeight().clip(RoundedCornerShape(8.dp)), contentScale = ContentScale.Crop)
         }
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(episode.code + " • " + episode.name, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = NetWhite)
-            Text(episode.overview, fontSize = 12.sp, color = NetMuted, maxLines = 2)
+            Text(episode.code + " • " + episode.name, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = NetWhite)
+            Text(episode.overview, fontSize = 13.sp, color = NetMuted, maxLines = 2)
         }
     }
 }
@@ -2104,12 +2269,12 @@ private fun SettingsScreen(
         )
     }
 
-    // ── Main Settings Screen: Zero Keyboard Trapping, 100% Remote-Friendly ──
+    // ── Main Settings Screen: Zero Keyboard Trapping, 100% Remote-Friendly with 5% Overscan Safe Margins ──
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 48.dp, vertical = 24.dp),
+            .padding(horizontal = TvOverscanHorizontal, vertical = TvOverscanVertical),
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         // ── 1. Google TV Account & Profile Hero Card ──

@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -795,13 +796,6 @@ fun FrameTvApp() {
         { selectedTitle -> detail = selectedTitle }
     }
 
-    val onPlay: (Title) -> Unit = remember {
-        { selectedTitle ->
-            val updatedRecent = store.addRecent(selectedTitle)
-            recent = updatedRecent
-        }
-    }
-
     Box(
         Modifier
             .fillMaxSize()
@@ -1072,7 +1066,6 @@ fun NetflixExpandedCard(
     var showPreview by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
 
-    // Delayed preview timer (1.5 seconds rest on focus triggers video trailer/preview)
     LaunchedEffect(focused) {
         if (focused) {
             delay(1500)
@@ -1082,7 +1075,6 @@ fun NetflixExpandedCard(
         }
     }
 
-    // Smooth Netflix-style scaling & z-index elevation when focused
     val scaleAnim by animateFloatAsState(
         targetValue = if (focused) 1.15f else 1f,
         animationSpec = tween(220, easing = FastOutSlowInEasing),
@@ -1093,14 +1085,13 @@ fun NetflixExpandedCard(
     val url = if (isWide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w342")
     val ph = remember(t.id) { placeholder(t.id) }
 
-    // ExoPlayer instance initialized only when expanded preview triggers
     val exoPlayer = remember(showPreview, t.key) {
         if (showPreview) {
             ExoPlayer.Builder(ctx).build().apply {
                 val mediaItem = MediaItem.fromUri("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
                 setMediaItem(mediaItem)
                 repeatMode = Player.REPEAT_MODE_ALL
-                volume = 0f // Muted background trailer preview
+                volume = 0f
                 prepare()
                 playWhenReady = true
             }
@@ -1147,7 +1138,6 @@ fun NetflixExpandedCard(
                 },
                 modifier = Modifier.fillMaxSize()
             )
-            // Cinematic Gradient Overlay with Title and metadata inside expanded card
             Box(
                 Modifier
                     .fillMaxSize()
@@ -1663,11 +1653,6 @@ fun AboutPanel() {
             fontSize = 16.sp
         )
     }
-}
-
-@Composable
-float SecretField(label: String, value: String, onChange: (String) -> Unit) {
-    // Kept inside SecretField helper block
 }
 
 @Composable

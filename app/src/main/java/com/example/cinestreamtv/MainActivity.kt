@@ -558,15 +558,15 @@ fun FrameTvApp() {
         }
     }
 
-    val onOpen = remember {
-        { t: Title -> detail = t }
+    val onOpen: (Title) -> Unit = remember {
+        { selectedTitle -> detail = selectedTitle }
     }
 
     val onPlay: (Title) -> Unit = remember {
-        { t ->
-            recent = store.addRecent(t)
+        { selectedTitle ->
+            recent = store.addRecent(selectedTitle)
             scope.launch {
-                val streamUrl = TorBoxScraper.resolveStream(t, 1, 1, torboxKey)
+                val streamUrl = TorBoxScraper.resolveStream(selectedTitle, 1, 1, torboxKey)
                 if (streamUrl != null) {
                     Toast.makeText(ctx, "TorBox Stream Linked Successfully", Toast.LENGTH_SHORT).show()
                 } else {
@@ -578,22 +578,23 @@ fun FrameTvApp() {
     }
 
     val onPlayEpisode: (Title, Int, Int) -> Unit = remember {
-        { t, sNum, eNum ->
-            recent = store.addRecent(t)
+        { selectedTitle, sNum, eNum ->
+            recent = store.addRecent(selectedTitle)
             scope.launch {
-                val streamUrl = TorBoxScraper.resolveStream(t, sNum, eNum, torboxKey)
+                val streamUrl = TorBoxScraper.resolveStream(selectedTitle, sNum, eNum, torboxKey)
                 if (streamUrl != null) {
                     Toast.makeText(ctx, "Episode S${sNum}E${eNum} Stream Linked", Toast.LENGTH_SHORT).show()
                 } else {
                     Toast.makeText(ctx, "Playback started for S${sNum}E${eNum}", Toast.LENGTH_SHORT).show()
                 }
             }
+            Unit
         }
     }
 
     val onToggle: (Title) -> Unit = remember {
-        { t ->
-            saved = store.toggleSaved(t)
+        { selectedTitle ->
+            saved = store.toggleSaved(selectedTitle)
         }
     }
 
@@ -627,12 +628,12 @@ fun FrameTvApp() {
                     onOpen
                 )
                 Tab.Library -> LibraryScreen(saved, recent, onOpen)
-                Tab.Settings -> SettingsScreen(store) { 
-                    tmdbKey = it 
+                Tab.Settings -> SettingsScreen(store) { selectedKey ->
+                    tmdbKey = selectedKey
                     torboxKey = store.get("torbox")
                 }
             }
-            TopNav(Modifier.align(Alignment.TopCenter), tab) { tab = it }
+            TopNav(Modifier.align(Alignment.TopCenter), tab) { selectedTab -> tab = selectedTab }
         }
     }
 }
@@ -669,8 +670,8 @@ fun TopNav(modifier: Modifier, current: Tab, onSelect: (Tab) -> Unit) {
                 .padding(6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Tab.values().forEach { t ->
-                NavTab(t.label, t == current) { onSelect(t) }
+            Tab.values().forEach { tabItem ->
+                NavTab(tabItem.label, tabItem == current) { onSelect(tabItem) }
             }
         }
     }
@@ -689,7 +690,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { focusState -> focused = focusState.isFocused }
             .clip(shape)
             .background(bg)
             .clickable(
@@ -746,7 +747,7 @@ fun HomeScreen(
                 contentPadding = PaddingValues(top = 110.dp, bottom = 60.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
-                items(rows, key = { it.title }) { row ->
+                items(rows, key = { rowItem -> rowItem.title }) { row ->
                     StaticRow(row, sz, onOpen)
                 }
             }
@@ -770,7 +771,7 @@ fun StaticRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
             contentPadding = PaddingValues(horizontal = 64.dp),
             horizontalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            itemsIndexed(row.list, key = { _, t -> t.key }) { i, t ->
+            itemsIndexed(row.list, key = { _, titleItem -> titleItem.key }) { i, t ->
                 PosterCard(
                     t,
                     row.wide,
@@ -800,9 +801,9 @@ fun PosterCard(t: Title, wide: Boolean, sz: Sizes, onFocused: () -> Unit, onClic
             .width(w)
             .height(h)
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocused()
+            .onFocusChanged { focusState ->
+                focused = focusState.isFocused
+                if (focusState.isFocused) onFocused()
             }
             .clip(shape)
             .background(Brush.linearGradient(ph))
@@ -969,7 +970,7 @@ fun DetailScreen(
                 }
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(extra?.seasons ?: emptyList(), key = { it.number }) { s ->
+                        items(extra?.seasons ?: emptyList(), key = { seasonItem -> seasonItem.number }) { s ->
                             PillButton("Season ${s.number}", primary = s.number == season) {
                                 season = s.number
                             }
@@ -981,7 +982,7 @@ fun DetailScreen(
                         Text("Loading episodes…", color = Color.White.copy(alpha = 0.6f), fontSize = 18.sp)
                     } else {
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-                            items(eps, key = { it.number }) { e ->
+                            items(eps, key = { episodeItem -> episodeItem.number }) { e ->
                                 EpisodeCard(e) {
                                     onPlayEpisode(t, season, e.number)
                                 }
@@ -1006,7 +1007,9 @@ fun EpisodeCard(e: Episode, onClick: () -> Unit) {
             Modifier
                 .width(280.dp)
                 .height(158.dp)
-                .onFocusChanged { focused = it.isFocused }
+                .onFocusChanged { focusState ->
+                    focused = focusState.isFocused
+                }
                 .clip(shape)
                 .background(Brush.linearGradient(placeholder(e.number)))
                 .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
@@ -1089,13 +1092,13 @@ fun SearchScreen(
                 }
                 BasicTextField(
                     value = query,
-                    onValueChange = { query = it },
+                    onValueChange = { newQuery -> query = newQuery },
                     singleLine = true,
                     textStyle = TextStyle(color = Color.White, fontSize = 22.sp),
                     cursorBrush = SolidColor(Color.White),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .onFocusChanged { focused = it.isFocused }
+                        .onFocusChanged { focusState -> focused = focusState.isFocused }
                 )
             }
             Spacer(Modifier.height(14.dp))
@@ -1218,9 +1221,9 @@ fun SettingsTab(label: String, selected: Boolean, onSelect: () -> Unit) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
             .background(bg)
-            .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onSelect()
+            .onFocusChanged { focusState ->
+                focused = focusState.isFocused
+                if (focusState.isFocused) onSelect()
             }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1261,9 +1264,9 @@ fun ServicesPanel(store: Store, onSaved: () -> Unit) {
                 lineHeight = 22.sp
             )
         }
-        item { SecretField("TMDB API key", tmdb) { tmdb = it; saved = false } }
-        item { SecretField("TorBox API key", torbox) { torbox = it; saved = false } }
-        item { SecretField("Real-Debrid API key", rd) { rd = it; saved = false } }
+        item { SecretField("TMDB API key", tmdb) { newKey -> tmdb = newKey; saved = false } }
+        item { SecretField("TorBox API key", torbox) { newKey -> torbox = newKey; saved = false } }
+        item { SecretField("Real-Debrid API key", rd) { newKey -> rd = newKey; saved = false } }
         item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
@@ -1340,7 +1343,7 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
                     Color.White.copy(alpha = if (active) 1f else 0.3f),
                     shape
                 )
-                .onFocusChanged { focused = it.isFocused }
+                .onFocusChanged { focusState -> focused = focusState.isFocused }
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,

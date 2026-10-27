@@ -57,6 +57,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import java.net.HttpURLConnection
@@ -87,7 +88,8 @@ data class Title(
     val rating: Double,
     val poster: String?,
     val backdrop: String?,
-    val progress: Float = 0f
+    val progress: Float = 0f,
+    val savedPosMs: Long = 0L
 ) {
     val key: String get() = "$type-$id"
 
@@ -102,6 +104,7 @@ data class Title(
         o.put("poster", poster ?: "")
         o.put("backdrop", backdrop ?: "")
         o.put("progress", progress.toDouble())
+        o.put("savedPosMs", savedPosMs)
         return o
     }
 
@@ -115,13 +118,14 @@ data class Title(
             o.optDouble("rating", 0.0),
             o.optString("poster", "").ifEmpty { null },
             o.optString("backdrop", "").ifEmpty { null },
-            o.optDouble("progress", 0.0).toFloat()
+            o.optDouble("progress", 0.0).toFloat(),
+            o.optLong("savedPosMs", 0L)
         )
     }
 }
 
 @Immutable
-class RowData(val title: String, val list: List<Title>, val wide: Boolean)
+class RowData(val title: String, val list: List<Title>)
 
 data class SeasonInfo(val number: Int, val name: String, val count: Int)
 
@@ -140,12 +144,11 @@ enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
-class Sizes(val viewportH: Dp, val posterH: Dp, val posterW: Dp, val wideH: Dp, val wideW: Dp)
+class Sizes(val posterH: Dp, val posterW: Dp)
 
 fun sizesFor(maxH: Dp): Sizes {
-    val vp = maxH * 0.48f
-    val ph = (vp - 56.dp) / 1.12f
-    return Sizes(vp, ph, ph * 0.667f, ph * 0.9f, ph * 0.9f * 1.6f)
+    val ph = (maxH * 0.45f - 40.dp) / 1.15f
+    return Sizes(ph, ph * 0.67f)
 }
 
 // ======================= Storage =======================
@@ -178,9 +181,17 @@ class Store(ctx: Context) {
     fun saved(): List<Title> = readList("saved")
 
     fun addRecent(t: Title): List<Title> {
-        val l = (listOf(t.copy(progress = 0.15f)) + recent().filter { it.key != t.key }).take(15)
+        val l = (listOf(t) + recent().filter { it.key != t.key }).take(15)
         writeList("recent", l)
         return l
+    }
+
+    fun updateProgress(t: Title, currentPosMs: Long, totalDurationMs: Long) {
+        if (totalDurationMs <= 0L) return
+        val pct = (currentPosMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0f, 1f)
+        val updated = t.copy(progress = pct, savedPosMs = currentPosMs)
+        val l = (listOf(updated) + recent().filter { it.key != t.key }).take(15)
+        writeList("recent", l)
     }
 
     fun toggleSaved(t: Title): List<Title> {
@@ -194,14 +205,47 @@ class Store(ctx: Context) {
 // ======================= TorBox Scraper Engine =======================
 
 object TorBoxScraper {
+    private const val API_BASE = "https://api.torbox.app/v1/api"
+
     suspend fun resolveStream(
         title: Title,
         season: Int = 1,
         episode: Int = 1,
         torboxKey: String
     ): String = withContext(Dispatchers.IO) {
-        // Guaranteed working MP4 test stream URL
-        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+        if (torboxKey.isNotBlank()) {
+            try {
+                val queryName = if (title.type == "tv") {
+                    "${title.name} S%02dE%02d".format(Locale.US, season, episode)
+                } else {
+                    "${title.name} ${title.year}"
+                }
+                val encodedQuery = URLEncoder.encode(queryName, "UTF-8")
+                val searchUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery&format=list")
+                val conn = searchUrl.openConnection() as HttpURLConnection
+                conn.requestMethod = "GET"
+                conn.setRequestProperty("Authorization", "Bearer $torboxKey")
+                conn.setRequestProperty("accept", "application/json")
+                conn.connectTimeout = 6000
+                conn.readTimeout = 6000
+
+                if (conn.responseCode == 200) {
+                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(text)
+                    if (json.optBoolean("success", false)) {
+                        val data = json.optJSONArray("data")
+                        if (data != null && data.length() > 0) {
+                            val directUrl = data.getJSONObject(0).optString("url", "")
+                            if (directUrl.isNotEmpty()) return@withContext directUrl
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Fallback to demo video if network error occurs during cache check
+            }
+        }
+        // Guaranteed working fallback stream URL
+        "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
     }
 }
 
@@ -210,7 +254,7 @@ object TorBoxScraper {
 object Tmdb {
     private const val BASE = "https://api.themoviedb.org/3"
 
-    private class RowDef(val title: String, val path: String, val type: String?, val isWide: Boolean = false)
+    private class RowDef(val title: String, val path: String, val type: String?)
 
     private fun JSONObject.str(k: String): String? =
         if (isNull(k)) null else optString(k).ifEmpty { null }
@@ -272,20 +316,20 @@ object Tmdb {
 
     suspend fun loadRows(key: String): List<RowData> = coroutineScope {
         val defs = listOf(
-            RowDef("Top Picks For You", "/trending/all/week", null, true),
-            RowDef("Action & Adventure Movies", "/discover/movie", "movie", false),
-            RowDef("Top 10 Series This Week", "/tv/popular", "tv", false),
-            RowDef("Sci-Fi & Fantasy Universe", "/discover/movie", "movie", true),
-            RowDef("Critically Acclaimed Cinema", "/movie/top_rated", "movie", false),
-            RowDef("Animation & Family Hits", "/discover/movie", "movie", false),
-            RowDef("Binge-Worthy TV Shows", "/tv/top_rated", "tv", true),
-            RowDef("Comedy Specials & Movies", "/discover/movie", "movie", false),
-            RowDef("Trending Dramas", "/discover/tv", "tv", false),
-            RowDef("Popular Now", "/movie/popular", "movie", false)
+            RowDef("Top Picks For You", "/trending/all/week", null),
+            RowDef("Action & Adventure", "/discover/movie", "movie"),
+            RowDef("Top Series This Week", "/tv/popular", "tv"),
+            RowDef("Sci-Fi & Fantasy Universe", "/discover/movie", "movie"),
+            RowDef("Critically Acclaimed Cinema", "/movie/top_rated", "movie"),
+            RowDef("Animation & Family Hits", "/discover/movie", "movie"),
+            RowDef("Binge-Worthy TV Shows", "/tv/top_rated", "tv"),
+            RowDef("Comedy Specials & Movies", "/discover/movie", "movie"),
+            RowDef("Trending Dramas", "/discover/tv", "tv"),
+            RowDef("Popular Now", "/movie/popular", "movie")
         )
         
         val params = mapOf(
-            "Action & Adventure Movies" to "with_genres=28",
+            "Action & Adventure" to "with_genres=28",
             "Sci-Fi & Fantasy Universe" to "with_genres=878",
             "Animation & Family Hits" to "with_genres=16",
             "Comedy Specials & Movies" to "with_genres=35",
@@ -295,7 +339,7 @@ object Tmdb {
         defs.map { d ->
             async {
                 val queryParams = params[d.title] ?: ""
-                RowData(d.title, list(if (queryParams.isNotEmpty()) "${d.path}?$queryParams" else d.path, key, d.type), d.isWide)
+                RowData(d.title, list(if (queryParams.isNotEmpty()) "${d.path}?$queryParams" else d.path, key, d.type))
             }
         }.awaitAll().filter { it.list.isNotEmpty() }
     }
@@ -429,7 +473,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
     }
 }
 
-// ======================= Smooth scrolling =======================
+// ======================= Smooth Scrolling =======================
 
 suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 300) {
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
@@ -504,13 +548,15 @@ fun PillButton(
     }
 }
 
-// ======================= Fixed ExoPlayer Component =======================
+// ======================= Universal Player =======================
 
 @OptIn(UnstableApi::class)
 @Composable
 fun AppleTvPlayerScreen(
     title: String,
+    titleObj: Title,
     streamUrl: String,
+    store: Store,
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -521,17 +567,22 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.3 (Linux; Android)")
+            .setUserAgent("FrameTV/1.4 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(15000)
-            .setReadTimeoutMs(15000)
-            
-        val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
-            .createMediaSource(MediaItem.fromUri(Uri.parse(streamUrl)))
+
+        val uri = Uri.parse(streamUrl)
+        val mediaSource = if (streamUrl.contains(".m3u8")) {
+            HlsMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+        } else {
+            ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+        }
 
         ExoPlayer.Builder(ctx).build().apply {
             setMediaSource(mediaSource)
             prepare()
+            if (titleObj.savedPosMs > 0L) {
+                seekTo(titleObj.savedPosMs)
+            }
             playWhenReady = true
         }
     }
@@ -542,11 +593,14 @@ fun AppleTvPlayerScreen(
                 isPlaying = playing
             }
             override fun onPlayerError(error: PlaybackException) {
-                Toast.makeText(ctx, "Playback error: ${error.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, "Stream Error: ${error.message}", Toast.LENGTH_SHORT).show()
             }
         }
         exoPlayer.addListener(listener)
         onDispose {
+            val pos = exoPlayer.currentPosition
+            val dur = exoPlayer.duration
+            store.updateProgress(titleObj, pos, dur)
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
@@ -681,7 +735,7 @@ fun formatTime(ms: Long): String {
     return String.format(Locale.US, "%02d:%02d", min, sec)
 }
 
-// ======================= Root Application =======================
+// ======================= Root App Container =======================
 
 @Composable
 fun FrameTvApp() {
@@ -697,7 +751,7 @@ fun FrameTvApp() {
     var recent by remember { mutableStateOf(store.recent()) }
     var saved by remember { mutableStateOf(store.saved()) }
     var detail by remember { mutableStateOf<Title?>(null) }
-    var activePlaybackUrl by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var activePlayback by remember { mutableStateOf<Triple<String, Title, String>?>(null) }
     var lastBackPress by remember { mutableStateOf(0L) }
     
     val baseBackground = Brush.verticalGradient(
@@ -705,13 +759,13 @@ fun FrameTvApp() {
     )
 
     val homeRows = remember(rows, recent) {
-        val cw = if (recent.isNotEmpty()) listOf(RowData("Continue Watching", recent, true)) else emptyList()
+        val cw = if (recent.isNotEmpty()) listOf(RowData("Continue Watching", recent)) else emptyList()
         cw + rows
     }
 
     BackHandler {
         when {
-            activePlaybackUrl != null -> activePlaybackUrl = null
+            activePlayback != null -> activePlayback = null
             detail != null -> detail = null
             tab != Tab.Home -> tab = Tab.Home
             else -> {
@@ -751,7 +805,7 @@ fun FrameTvApp() {
             recent = updatedRecent
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(selectedTitle, 1, 1, torboxKey)
-                activePlaybackUrl = Pair(selectedTitle.name, streamUrl)
+                activePlayback = Triple(selectedTitle.name, selectedTitle, streamUrl)
             }
         }
     }
@@ -762,7 +816,7 @@ fun FrameTvApp() {
             recent = updatedRecent
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(selectedTitle, sNum, eNum, torboxKey)
-                activePlaybackUrl = Pair("${selectedTitle.name} S${sNum}E${eNum}", streamUrl)
+                activePlayback = Triple("${selectedTitle.name} S${sNum}E${eNum}", selectedTitle, streamUrl)
             }
         }
     }
@@ -778,14 +832,16 @@ fun FrameTvApp() {
             .fillMaxSize()
             .background(baseBackground)
     ) {
-        val playerItem = activePlaybackUrl
+        val playerItem = activePlayback
         val d = detail
 
         if (playerItem != null) {
             AppleTvPlayerScreen(
                 title = playerItem.first,
-                streamUrl = playerItem.second,
-                onBack = { activePlaybackUrl = null }
+                titleObj = playerItem.second,
+                streamUrl = playerItem.third,
+                store = store,
+                onBack = { activePlayback = null }
             )
         } else if (d != null) {
             DetailScreen(
@@ -798,7 +854,6 @@ fun FrameTvApp() {
                 onToggle = { onToggle(d) }
             )
         } else {
-            // Fixed layout hierarchy using Column so TopNav does not block scrolling
             Column(Modifier.fillMaxSize()) {
                 TopNav(current = tab) { selectedTab -> tab = selectedTab }
                 Box(Modifier.weight(1f)) {
@@ -826,7 +881,7 @@ fun FrameTvApp() {
     }
 }
 
-// ======================= Top Nav Header =======================
+// ======================= Top Navigation Header =======================
 
 @Composable
 fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
@@ -946,7 +1001,7 @@ fun HomeScreen(
     }
 }
 
-// ======================= Rows & Cards =======================
+// ======================= Rows & Uniform Posters =======================
 
 @Composable
 fun StaticRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
@@ -965,7 +1020,6 @@ fun StaticRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
             itemsIndexed(row.list, key = { _, titleItem -> titleItem.key }) { i, t ->
                 PosterCard(
                     t,
-                    row.wide,
                     sz,
                     onFocused = {
                         scope.launch { rowState.centerItem(i, 280) }
@@ -978,19 +1032,17 @@ fun StaticRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
 }
 
 @Composable
-fun PosterCard(t: Title, wide: Boolean, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) {
+fun PosterCard(t: Title, sz: Sizes, onFocused: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(180), label = "cardScale")
     val shape = RoundedCornerShape(18.dp)
-    val w = if (wide) sz.wideW else sz.posterW
-    val h = if (wide) sz.wideH else sz.posterH
-    val url = if (wide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w342")
+    val url = img(t.poster ?: t.backdrop, "w342")
     val ph = remember(t.id) { placeholder(t.id) }
 
     Box(
         Modifier
-            .width(w)
-            .height(h)
+            .width(sz.posterW)
+            .height(sz.posterH)
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focusState ->
                 focused = focusState.isFocused
@@ -1015,11 +1067,11 @@ fun PosterCard(t: Title, wide: Boolean, sz: Sizes, onFocused: () -> Unit, onClic
             )
         }
         RemoteImage(url, Modifier.fillMaxSize())
-        if (wide && t.progress > 0f) {
+        if (t.progress > 0f) {
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(RoundedCornerShape(50))
@@ -1267,7 +1319,7 @@ fun SearchScreen(
     val isQuery = query.trim().length >= 2
     val showing = if (isQuery) results else fallback
     val label = if (isQuery) "Results" else "Trending"
-    val rowData = remember(showing, label) { RowData(label, showing, false) }
+    val rowData = remember(showing, label) { RowData(label, showing) }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val sz = sizesFor(maxHeight)
@@ -1345,10 +1397,10 @@ fun LibraryScreen(
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
                 if (saved.isNotEmpty()) {
-                    item(key = "saved") { StaticRow(RowData("My List", saved, false), sz, onOpen) }
+                    item(key = "saved") { StaticRow(RowData("My List", saved), sz, onOpen) }
                 }
                 if (recent.isNotEmpty()) {
-                    item(key = "recent") { StaticRow(RowData("Recently Played", recent, true), sz, onOpen) }
+                    item(key = "recent") { StaticRow(RowData("Recently Played", recent), sz, onOpen) }
                 }
             }
         }
@@ -1486,7 +1538,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.3", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.4", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

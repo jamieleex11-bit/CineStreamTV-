@@ -509,6 +509,7 @@ fun PillButton(
 fun FrameTvApp() {
     val ctx = LocalContext.current
     val store = remember { Store(ctx) }
+    val scope = rememberCoroutineScope()
 
     var tab by remember { mutableStateOf(Tab.Home) }
     var tmdbKey by remember { mutableStateOf(store.get("tmdb")) }
@@ -557,10 +558,10 @@ fun FrameTvApp() {
         }
     }
 
-    val scope = rememberCoroutineScope()
-    val onOpen = remember { { t: Title -> detail = t } }
-    
-    // Fixed lambda return type by enclosing inside braces so it returns Unit cleanly
+    val onOpen: (Title) -> Unit = remember {
+        { t -> detail = t }
+    }
+
     val onPlay: (Title) -> Unit = remember {
         { t ->
             recent = store.addRecent(t)
@@ -572,11 +573,14 @@ fun FrameTvApp() {
                     Toast.makeText(ctx, "Playback started via TorBox cache", Toast.LENGTH_SHORT).show()
                 }
             }
-            Unit
         }
     }
-    
-    val onToggle = remember { { t: Title -> saved = store.toggleSaved(t) } }
+
+    val onToggle: (Title) -> Unit = remember {
+        { t ->
+            saved = store.toggleSaved(t)
+        }
+    }
 
     Box(
         Modifier

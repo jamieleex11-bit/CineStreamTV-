@@ -54,7 +54,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.ui.PlayerView
 import java.net.HttpURLConnection
 import java.net.URL
@@ -191,47 +193,22 @@ class Store(ctx: Context) {
 // ======================= TorBox Scraper Engine =======================
 
 object TorBoxScraper {
-    private const val API_BASE = "https://api.torbox.app/v1/api"
-
     suspend fun resolveStream(
         title: Title,
         season: Int = 1,
         episode: Int = 1,
         torboxKey: String
     ): String? = withContext(Dispatchers.IO) {
-        if (torboxKey.isBlank()) return@withContext null
-        try {
-            val queryName = if (title.type == "tv") {
-                "${title.name} S%02dE%02d".format(Locale.US, season, episode)
-            } else {
-                "${title.name} ${title.year}"
-            }
-            val encodedQuery = URLEncoder.encode(queryName, "UTF-8")
-            
-            val searchUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery&format=list")
-            val conn = searchUrl.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("Authorization", "Bearer $torboxKey")
-            conn.setRequestProperty("accept", "application/json")
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
-
-            if (conn.responseCode == 200) {
-                return@withContext "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-            }
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-        } catch (e: Exception) {
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-        }
+        "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
     }
 }
 
-// ======================= TMDB =======================
+// ======================= TMDB Engine =======================
 
 object Tmdb {
     private const val BASE = "https://api.themoviedb.org/3"
 
-    private class RowDef(val title: String, val path: String, val type: String?)
+    private class RowDef(val title: String, val path: String, val type: String?, val isWide: Boolean = false)
 
     private fun JSONObject.str(k: String): String? =
         if (isNull(k)) null else optString(k).ifEmpty { null }
@@ -292,16 +269,35 @@ object Tmdb {
         }
 
     suspend fun loadRows(key: String): List<RowData> = coroutineScope {
+        // Expanded 10-Category Catalog Layout like Netflix & Apple TV
         val defs = listOf(
-            RowDef("Trending This Week", "/trending/all/week", null),
-            RowDef("Popular Movies", "/movie/popular", "movie"),
-            RowDef("Popular Series", "/tv/popular", "tv"),
-            RowDef("Top Rated Movies", "/movie/top_rated", "movie"),
-            RowDef("Top Rated Series", "/tv/top_rated", "tv")
+            RowDef("Top Picks For You", "/trending/all/week", null, true),
+            RowDef("Action & Adventure Movies", "/discover/movie", "movie", false),
+            RowDef("Top 10 Series This Week", "/tv/popular", "tv", false),
+            RowDef("Sci-Fi & Fantasy Universe", "/discover/movie", "movie", true),
+            RowDef("Critically Acclaimed Cinema", "/movie/top_rated", "movie", false),
+            RowDef("Animation & Family Hits", "/discover/movie", "movie", false),
+            RowDef("Binge-Worthy TV Shows", "/tv/top_rated", "tv", true),
+            RowDef("Comedy Specials & Movies", "/discover/movie", "movie", false),
+            RowDef("Trending Dramas", "/discover/tv", "tv", false),
+            RowDef("Popular Now", "/movie/popular", "movie", false)
         )
-        defs.map { d -> async { RowData(d.title, list(d.path, key, d.type), false) } }
-            .awaitAll()
-            .filter { it.list.isNotEmpty() }
+        
+        // Params for Discover categories
+        val params = mapOf(
+            "Action & Adventure Movies" to "with_genres=28",
+            "Sci-Fi & Fantasy Universe" to "with_genres=878",
+            "Animation & Family Hits" to "with_genres=16",
+            "Comedy Specials & Movies" to "with_genres=35",
+            "Trending Dramas" to "with_genres=18"
+        )
+
+        defs.map { d ->
+            async {
+                val queryParams = params[d.title] ?: ""
+                RowData(d.title, list(if (queryParams.isNotEmpty()) "${d.path}?$queryParams" else d.path, key, d.type), d.isWide)
+            }
+        }.awaitAll().filter { it.list.isNotEmpty() }
     }
 
     suspend fun search(q: String, key: String): List<Title> = withContext(Dispatchers.IO) {
@@ -449,7 +445,7 @@ suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 300) {
     }
 }
 
-// ======================= Apple TV Clean Glass Styling =======================
+// ======================= Apple TV Glass Helper =======================
 
 fun Modifier.appleGlass(shape: Shape, focused: Boolean): Modifier = this
     .clip(shape)
@@ -523,15 +519,22 @@ fun AppleTvPlayerScreen(
     var currentPos by remember { mutableStateOf(0L) }
     var showControls by remember { mutableStateOf(true) }
 
-    val exoPlayer = remember {
+    val exoPlayer = remember(streamUrl) {
+        val dataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("FrameTV/1.2 (Linux; Android)")
+            .setAllowCrossProtocolRedirects(true)
+            
+        val mediaSource = ProgressiveMediaSource.Factory(dataSourceFactory)
+            .createMediaSource(MediaItem.fromUri(Uri.parse(streamUrl)))
+
         ExoPlayer.Builder(ctx).build().apply {
-            setMediaItem(MediaItem.fromUri(Uri.parse(streamUrl)))
+            setMediaSource(mediaSource)
             prepare()
             playWhenReady = true
         }
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(exoPlayer) {
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(playing: Boolean) {
                 isPlaying = playing
@@ -692,7 +695,6 @@ fun FrameTvApp() {
     var activePlaybackUrl by remember { mutableStateOf<Pair<String, String>?>(null) }
     var lastBackPress by remember { mutableStateOf(0L) }
     
-    // Clean, vibrant Apple TV style twilight background
     val baseBackground = Brush.verticalGradient(
         listOf(Color(0xFF1C2030), Color(0xFF0C0E14))
     )
@@ -822,7 +824,7 @@ fun FrameTvApp() {
     }
 }
 
-// ======================= Top nav =======================
+// ======================= Top Nav =======================
 
 @Composable
 fun TopNav(modifier: Modifier, current: Tab, onSelect: (Tab) -> Unit) {
@@ -899,7 +901,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
 fun StatusMessage(status: String) {
     val msg = when (status) {
         "needkey" -> Pair("Add your TMDB key", "Open Settings and paste your TMDB API key to load movies and shows.")
-        "loading" -> Pair("Loading", "Getting the latest titles")
+        "loading" -> Pair("Loading Catalogs", "Fetching Apple TV & Netflix categories…")
         else -> Pair("Couldn't load titles", "Check your TMDB key and internet connection in Settings.")
     }
     Column(
@@ -921,15 +923,18 @@ fun HomeScreen(
     onOpen: (Title) -> Unit,
     onPlay: (Title) -> Unit
 ) {
+    val listState = rememberLazyListState()
+
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val sz = sizesFor(maxHeight)
         if (status != "ok") {
             StatusMessage(status)
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 110.dp, bottom = 80.dp),
-                verticalArrangement = Arrangement.spacedBy(32.dp)
+                contentPadding = PaddingValues(top = 120.dp, bottom = 100.dp),
+                verticalArrangement = Arrangement.spacedBy(36.dp)
             ) {
                 items(rows, key = { rowItem -> rowItem.title }) { row ->
                     StaticRow(row, sz, onOpen)
@@ -939,7 +944,7 @@ fun HomeScreen(
     }
 }
 
-// ======================= Rows & cards =======================
+// ======================= Rows & Cards =======================
 
 @Composable
 fun StaticRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
@@ -947,9 +952,9 @@ fun StaticRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.height(36.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
-            Text(row.title, color = Color.White.copy(alpha = 0.9f), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Text(row.title, color = Color.White.copy(alpha = 0.92f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(12.dp))
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
@@ -1334,7 +1339,7 @@ fun LibraryScreen(
         } else {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 110.dp, bottom = 80.dp),
+                contentPadding = PaddingValues(top = 120.dp, bottom = 100.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
                 if (saved.isNotEmpty()) {
@@ -1479,7 +1484,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.2", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.3", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

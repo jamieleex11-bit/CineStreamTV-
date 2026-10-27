@@ -1,11 +1,14 @@
 package com.example.cinestreamtv
 
+import android.app.Activity
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import android.util.LruCache
+import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
@@ -19,6 +22,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,16 +37,17 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import kotlin.math.abs
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.collectLatest
 import org.json.JSONArray
@@ -321,14 +327,29 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
 
 // ======================= Smooth scrolling =======================
 
-// Glides the list so item [index] lands at the start edge, with an eased animation.
-suspend fun LazyListState.glideTo(index: Int, durationMs: Int = 420) {
+// Vertical rows: put item [index] at the top edge of the list.
+suspend fun LazyListState.glideTo(index: Int, durationMs: Int = 450) {
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
     if (item == null) {
         animateScrollToItem(index)
     } else {
         val delta = (item.offset - layoutInfo.beforeContentPadding).toFloat()
-        if (delta != 0f) {
+        if (abs(delta) > 1f) {
+            animateScrollBy(delta, tween(durationMs, easing = FastOutSlowInEasing))
+        }
+    }
+}
+
+// Horizontal rows: center item [index] in the row.
+suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 320) {
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+    if (item == null) {
+        animateScrollToItem(index)
+    } else {
+        val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
+        val itemCenter = item.offset + item.size / 2f
+        val delta = itemCenter - viewportCenter
+        if (abs(delta) > 1f) {
             animateScrollBy(delta, tween(durationMs, easing = FastOutSlowInEasing))
         }
     }
@@ -402,6 +423,7 @@ fun PillButton(
 fun FrameTvApp() {
     val ctx = LocalContext.current
     val store = remember { Store(ctx) }
+    val scope = rememberCoroutineScope()
 
     var tab by remember { mutableStateOf(Tab.Home) }
     var tmdbKey by remember { mutableStateOf(store.get("tmdb")) }
@@ -412,8 +434,31 @@ fun FrameTvApp() {
     var heroTarget by remember { mutableStateOf<Title?>(null) }
     var hero by remember { mutableStateOf<Title?>(null) }
     var glow by remember { mutableStateOf(Color(0xFF3A2C8D)) }
+    var lastBackPress by remember { mutableStateOf(0L) }
     val homeState = rememberLazyListState()
     val base = Color(0xFF050509)
+
+    // Back button: leave other tabs for Home, scroll Home to top, double-press to exit
+    BackHandler {
+        when {
+            tab != Tab.Home -> {
+                tab = Tab.Home
+                scope.launch { homeState.scrollToItem(0) }
+            }
+            homeState.firstVisibleItemIndex > 0 || homeState.firstVisibleItemScrollOffset > 0 -> {
+                scope.launch { homeState.animateScrollToItem(0) }
+            }
+            else -> {
+                val now = System.currentTimeMillis()
+                if (now - lastBackPress < 2000L) {
+                    (ctx as? Activity)?.finish()
+                } else {
+                    lastBackPress = now
+                    Toast.makeText(ctx, "Press back again to exit", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     // load TMDB rows whenever the key changes
     LaunchedEffect(tmdbKey) {
@@ -432,8 +477,7 @@ fun FrameTvApp() {
         }
     }
 
-    // wait until focus settles before changing the hero.
-    // snapshotFlow keeps the root from recomposing on every D-pad move.
+    // wait until focus settles before changing the hero
     LaunchedEffect(Unit) {
         snapshotFlow { heroTarget }.collectLatest { t ->
             if (hero == null) {
@@ -516,7 +560,7 @@ fun FrameTvApp() {
             )
         }
 
-        // colored glow drawn in the draw phase (no recomposition while it animates)
+        // colored glow drawn in the draw phase
         Box(
             Modifier
                 .fillMaxSize()
@@ -681,12 +725,15 @@ fun HomeContent(
 
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
 
-    // glide so the focused row sits right at the top, nothing from the row above showing
+    // Hero goes to the very top; rows glide so their title sits at the top edge
     val goTo = remember(state, scope) {
         { row: Int ->
             if (row != lastRow) {
                 lastRow = row
-                scope.launch { state.glideTo(row, 450) }
+                scope.launch {
+                    if (row == 0) state.animateScrollToItem(0)
+                    else state.glideTo(row, 450)
+                }
                 Unit
             }
         }
@@ -696,15 +743,15 @@ fun HomeContent(
 
     LazyColumn(
         state = state,
-        contentPadding = PaddingValues(top = 10.dp, bottom = 140.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 140.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item(key = "hero") {
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(400.dp)
-                    .padding(horizontal = 64.dp)
+                    .height(470.dp)
+                    .padding(horizontal = 64.dp, vertical = 16.dp)
             ) {
                 Column(
                     Modifier
@@ -803,7 +850,7 @@ fun PosterRow(
         )
         LazyRow(
             state = rowState,
-            contentPadding = PaddingValues(horizontal = 64.dp, vertical = 26.dp),
+            contentPadding = PaddingValues(horizontal = 64.dp, vertical = 36.dp),
             horizontalArrangement = Arrangement.spacedBy(26.dp)
         ) {
             itemsIndexed(row.list, key = { _, t -> t.key }) { i, t ->
@@ -813,7 +860,7 @@ fun PosterRow(
                     onFocused = {
                         onFocus(t)
                         onRowFocus(rowIndex)
-                        scope.launch { rowState.glideTo((i - 1).coerceAtLeast(0), 320) }
+                        scope.launch { rowState.centerItem(i, 320) }
                     },
                     onClick = { onPlay(t) }
                 )
@@ -873,7 +920,6 @@ fun PosterCard(t: Title, wide: Boolean, onFocused: () -> Unit, onClick: () -> Un
                 )
             }
             RemoteImage(url, Modifier.fillMaxSize())
-            // soft light bloom, top-left
             Box(
                 Modifier
                     .fillMaxSize()
@@ -1056,33 +1102,115 @@ fun LibraryScreen(
 
 @Composable
 fun SettingsScreen(store: Store, onSaved: (String) -> Unit) {
+    var section by remember { mutableStateOf(0) }
+
+    Row(
+        Modifier
+            .fillMaxSize()
+            .padding(horizontal = 64.dp, vertical = 24.dp),
+        horizontalArrangement = Arrangement.spacedBy(28.dp)
+    ) {
+        // sidebar
+        Column(
+            Modifier
+                .width(260.dp)
+                .fillMaxHeight()
+                .glass(RoundedCornerShape(32.dp), false)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                "Settings",
+                color = Color.White,
+                fontSize = 26.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(start = 10.dp, top = 6.dp, bottom = 14.dp)
+            )
+            SettingsTab("Services", section == 0) { section = 0 }
+            SettingsTab("About", section == 1) { section = 1 }
+        }
+
+        // content panel
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxHeight()
+                .glass(RoundedCornerShape(32.dp), false)
+        ) {
+            when (section) {
+                0 -> ServicesPanel(store, onSaved)
+                else -> AboutPanel()
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsTab(label: String, selected: Boolean, onSelect: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val bg = when {
+        focused -> Color.White.copy(alpha = 0.92f)
+        selected -> Color.White.copy(alpha = 0.18f)
+        else -> Color.Transparent
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(bg)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onSelect()
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onSelect
+            )
+            .padding(horizontal = 22.dp, vertical = 16.dp)
+    ) {
+        Text(
+            label,
+            color = if (focused) Color.Black else Color.White.copy(alpha = if (selected) 1f else 0.7f),
+            fontSize = 19.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+fun ServicesPanel(store: Store, onSaved: (String) -> Unit) {
     var tmdb by remember { mutableStateOf(store.get("tmdb")) }
     var torbox by remember { mutableStateOf(store.get("torbox")) }
     var rd by remember { mutableStateOf(store.get("realdebrid")) }
     var saved by remember { mutableStateOf(false) }
 
-    Box(
-        Modifier
-            .padding(horizontal = 64.dp, vertical = 30.dp)
-            .widthIn(max = 820.dp)
-            .glass(RoundedCornerShape(36.dp), false)
-            .padding(40.dp)
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(36.dp),
+        verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        Column(
-            Modifier.verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
-        ) {
-            Text("Settings", color = Color.White, fontSize = 38.sp, fontWeight = FontWeight.Bold)
+        item {
+            Text("Services", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        }
+        item {
             Text(
-                "Get a free TMDB key at themoviedb.org → Settings → API",
+                "Paste each key once. They're saved on this device only. Press select on a box to type.",
                 color = Color.White.copy(alpha = 0.65f),
-                fontSize = 16.sp
+                fontSize = 16.sp,
+                lineHeight = 23.sp
             )
-
-            GlassField("TMDB API key", tmdb) { tmdb = it; saved = false }
-            GlassField("TorBox API key", torbox) { torbox = it; saved = false }
-            GlassField("Real-Debrid API key", rd) { rd = it; saved = false }
-
+        }
+        item {
+            SecretField("TMDB API key", tmdb) { tmdb = it; saved = false }
+        }
+        item {
+            SecretField("TorBox API key", torbox) { torbox = it; saved = false }
+        }
+        item {
+            SecretField("Real-Debrid API key", rd) { rd = it; saved = false }
+        }
+        item {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(18.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1101,28 +1229,81 @@ fun SettingsScreen(store: Store, onSaved: (String) -> Unit) {
 }
 
 @Composable
-fun GlassField(label: String, value: String, onChange: (String) -> Unit) {
+fun AboutPanel() {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(36.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        Text("Frame TV", color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+        Text("Version 1.0", color = Color.White.copy(alpha = 0.7f), fontSize = 18.sp)
+        Spacer(Modifier.height(10.dp))
+        Text(
+            "Movie and series info and artwork come from TMDB.",
+            color = Color.White.copy(alpha = 0.65f),
+            fontSize = 16.sp
+        )
+        Text(
+            "Streaming links are provided through TorBox and Real-Debrid.",
+            color = Color.White.copy(alpha = 0.65f),
+            fontSize = 16.sp
+        )
+    }
+}
+
+// Tap/select to start typing. Remote scrolling is never trapped by a text field.
+@Composable
+fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
+    var editing by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
+    val focusReq = remember { FocusRequester() }
+
+    BackHandler(enabled = editing) { editing = false }
+
+    LaunchedEffect(editing) {
+        if (editing) runCatching { focusReq.requestFocus() }
+    }
+
     Column {
         Text(label, color = Color.White.copy(alpha = 0.7f), fontSize = 15.sp)
         Spacer(Modifier.height(8.dp))
         Box(
             Modifier
                 .fillMaxWidth()
-                .glass(RoundedCornerShape(22.dp), focused)
+                .glass(RoundedCornerShape(22.dp), focused || editing)
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { editing = true }
+                )
                 .padding(horizontal = 24.dp, vertical = 18.dp)
         ) {
-            BasicTextField(
-                value = value,
-                onValueChange = onChange,
-                singleLine = true,
-                visualTransformation = if (focused) VisualTransformation.None else PasswordVisualTransformation(),
-                textStyle = TextStyle(color = Color.White, fontSize = 20.sp),
-                cursorBrush = SolidColor(Color.White),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .onFocusChanged { focused = it.isFocused }
-            )
+            if (editing) {
+                BasicTextField(
+                    value = value,
+                    onValueChange = onChange,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { editing = false }),
+                    textStyle = TextStyle(color = Color.White, fontSize = 20.sp),
+                    cursorBrush = SolidColor(Color.White),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusReq)
+                        .onFocusChanged { if (!it.isFocused) editing = false }
+                )
+            } else {
+                Text(
+                    if (value.isEmpty()) "Select to add" else maskKey(value),
+                    color = if (value.isEmpty()) Color.White.copy(alpha = 0.4f) else Color.White,
+                    fontSize = 20.sp
+                )
+            }
         }
     }
 }
+
+fun maskKey(v: String): String =
+    if (v.length <= 8) "••••••••" else v.take(4) + "••••••••" + v.takeLast(4)

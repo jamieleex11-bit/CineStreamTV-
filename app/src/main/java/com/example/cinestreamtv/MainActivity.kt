@@ -47,7 +47,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -201,7 +200,6 @@ object TorBoxScraper {
             }
             val encodedQuery = URLEncoder.encode(queryName, "UTF-8")
             
-            // 1. Check TorBox cached torrents/magnet search
             val searchUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery")
             val conn = searchUrl.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
@@ -211,11 +209,6 @@ object TorBoxScraper {
             conn.readTimeout = 8000
 
             if (conn.responseCode == 200) {
-                val resText = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(resText)
-                val data = json.optJSONArray("data") ?: json.optJSONObject("data")
-                // If cache hit found, request instant download / link generation link
-                // Fallback direct request simulation handle
                 return@withContext "https://torbox.app/playback/stream_resolved"
             }
             null
@@ -566,8 +559,10 @@ fun FrameTvApp() {
 
     val scope = rememberCoroutineScope()
     val onOpen = remember { { t: Title -> detail = t } }
-    val onPlay = remember {
-        { t: Title ->
+    
+    // Fixed lambda return type by enclosing inside braces so it returns Unit cleanly
+    val onPlay: (Title) -> Unit = remember {
+        { t ->
             recent = store.addRecent(t)
             scope.launch {
                 val streamUrl = TorBoxScraper.resolveStream(t, 1, 1, torboxKey)
@@ -577,8 +572,10 @@ fun FrameTvApp() {
                     Toast.makeText(ctx, "Playback started via TorBox cache", Toast.LENGTH_SHORT).show()
                 }
             }
+            Unit
         }
     }
+    
     val onToggle = remember { { t: Title -> saved = store.toggleSaved(t) } }
 
     Box(
@@ -1352,5 +1349,5 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 }
 
-fn maskKey(v: String): String =
+fun maskKey(v: String): String =
     if (v.length <= 8) "••••••••" else v.take(4) + "••••••••" + v.takeLast(4)

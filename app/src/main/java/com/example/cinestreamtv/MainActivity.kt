@@ -149,11 +149,11 @@ enum class Tab(val label: String) {
 
 class Sizes(val posterH: Dp, val posterW: Dp, val cwH: Dp, val cwW: Dp)
 
-// Normal posters made wider & squarer (aspect ratio ~0.82 instead of narrow portrait)
+// Substantially increased normal poster size & width for a bold Netflix 4K TV look
 fun sizesFor(maxH: Dp): Sizes {
-    val ph = maxH * 0.42f
-    val pw = ph * 0.82f   // Wider, closer to a square / slightly vertical rectangle
-    val cwH = maxH * 0.32f
+    val ph = maxH * 0.54f // 54% of screen height for prominent, large posters
+    val pw = ph * 0.85f   // Substantially wider and more substantial
+    val cwH = maxH * 0.35f
     return Sizes(ph, pw, cwH, cwH * 1.77f)
 }
 
@@ -572,7 +572,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.8 (Linux; Android)")
+            .setUserAgent("FrameTV/1.9 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -980,7 +980,7 @@ fun HomeScreen(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-                verticalArrangement = Arrangement.spacedBy(44.dp)
+                verticalArrangement = Arrangement.spacedBy(48.dp)
             ) {
                 if (recentList.isNotEmpty()) {
                     item(key = "continue_watching_shelf") {
@@ -1010,7 +1010,7 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(28.dp)
+            horizontalArrangement = Arrangement.spacedBy(32.dp)
         ) {
             itemsIndexed(list, key = { _, titleItem -> "cw-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
@@ -1038,7 +1038,7 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(28.dp)
+            horizontalArrangement = Arrangement.spacedBy(32.dp)
         ) {
             itemsIndexed(row.list, key = { _, titleItem -> titleItem.key }) { i, t ->
                 NetflixExpandedCard(
@@ -1078,7 +1078,7 @@ fun NetflixExpandedCard(
         }
     }
 
-    // Smooth width expansion from wider normal poster to 16:9 landscape rectangle
+    // Smooth width expansion from larger normal poster to 16:9 landscape rectangle
     val landscapeW = height * 1.77f
     val targetWidth = if (isWide) landscapeW * 1.1f else landscapeW
     
@@ -1094,7 +1094,7 @@ fun NetflixExpandedCard(
     val activeImageUrl = if (focused) {
         img(t.backdrop ?: t.poster, "w780")
     } else {
-        img(t.poster ?: t.backdrop, "w500")
+        img(t.poster ?: t.backdrop, "w780")
     }
 
     val ph = remember(t.id) { placeholder(t.id) }
@@ -1656,7 +1656,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.8", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.9", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

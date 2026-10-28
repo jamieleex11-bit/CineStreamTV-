@@ -141,7 +141,15 @@ data class Episode(
     val air: String
 )
 
-class TitleExtra(val runtime: String, val genres: String, val seasons: List<SeasonInfo>)
+class TitleExtra(
+    val runtime: String,
+    val genres: String,
+    val seasons: List<SeasonInfo>,
+    val releaseDate: String,
+    val director: String,
+    val cast: String,
+    val voteCount: Int
+)
 
 enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
@@ -149,10 +157,10 @@ enum class Tab(val label: String) {
 
 class Sizes(val posterH: Dp, val posterW: Dp, val cwH: Dp, val cwW: Dp)
 
-// Substantially increased normal poster size & width for a bold Netflix 4K TV look
+// Maintained large, bold normal posters for 4K TV look
 fun sizesFor(maxH: Dp): Sizes {
-    val ph = maxH * 0.54f // 54% of screen height for prominent, large posters
-    val pw = ph * 0.85f   // Substantially wider and more substantial
+    val ph = maxH * 0.54f
+    val pw = ph * 0.85f
     val cwH = maxH * 0.35f
     return Sizes(ph, pw, cwH, cwH * 1.77f)
 }
@@ -356,24 +364,81 @@ object Tmdb {
     }
 
     suspend fun details(t: Title, key: String): TitleExtra = withContext(Dispatchers.IO) {
-        val o = get("/${t.type}/${t.id}", key) ?: return@withContext TitleExtra("", "", emptyList())
+        val o = get("/${t.type}/${t.id}", key, appendToResponse = "credits") ?: return@withContext TitleExtra("", "", emptyList(), "", "", "", 0)
+        
         val runtime = if (t.type == "tv") {
             val m = o.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
-            if (m > 0) "${m}m" else ""
+            if (m > 0) "${m}m per episode" else ""
         } else {
             val m = o.optInt("runtime", 0)
             if (m > 0) "${m / 60}h ${m % 60}m" else ""
         }
+
         val genres = o.optJSONArray("genres")?.let { g ->
             (0 until g.length()).joinToString(" · ") { g.getJSONObject(it).optString("name") }
         } ?: ""
+
         val seasons = o.optJSONArray("seasons")?.let { s ->
             (0 until s.length()).map { i ->
                 val so = s.getJSONObject(i)
                 SeasonInfo(so.optInt("season_number"), so.optString("name"), so.optInt("episode_count"))
             }
         }?.filter { it.number > 0 } ?: emptyList()
-        TitleExtra(runtime, genres, seasons)
+
+        val releaseDate = o.optString("release_date").ifEmpty { o.optString("first_air_date", "") }
+        val voteCount = o.optInt("vote_count", 0)
+
+        // Credits parsing
+        val credits = o.optJSONObject("credits")
+        val director = if (t.type == "movie") {
+            val crew = credits?.optJSONArray("crew")
+            var dir = ""
+            if (crew != null) {
+                for (i in 0 until crew.length()) {
+                    val c = crew.getJSONObject(i)
+                    if (c.optString("job") == "Director") {
+                        dir = c.optString("name")
+                        break
+                    }
+                }
+            }
+            dir
+        } else {
+            val creators = o.optJSONArray("created_by")
+            if (creators != null && creators.length() > 0) {
+                creators.getJSONObject(0).optString("name")
+            } else ""
+        }
+
+        val castArr = credits?.optJSONArray("cast")
+        val cast = if (castArr != null) {
+            (0 until minOf(5, castArr.length())).joinToString(", ") { castArr.getJSONObject(it).optString("name") }
+        } else ""
+
+        TitleExtra(runtime, genres, seasons, releaseDate, director, cast, voteCount)
+    }
+
+    private fun get(path: String, key: String, params: String = "", appendToResponse: String = ""): JSONObject? {
+        return try {
+            val bearer = key.startsWith("eyJ")
+            val sb = StringBuilder(BASE).append(path).append("?language=en-US")
+            if (params.isNotEmpty()) sb.append("&").append(params)
+            if (appendToResponse.isNotEmpty()) sb.append("&append_to_response=").append(appendToResponse)
+            if (!bearer) sb.append("&api_key=").append(key)
+            val c = URL(sb.toString()).openConnection() as HttpURLConnection
+            c.connectTimeout = 10000
+            c.readTimeout = 10000
+            c.setRequestProperty("accept", "application/json")
+            if (bearer) c.setRequestProperty("Authorization", "Bearer $key")
+            if (c.responseCode != 200) {
+                null
+            } else {
+                val text = c.inputStream.bufferedReader().use { it.readText() }
+                JSONObject(text)
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     suspend fun season(id: Int, n: Int, key: String): List<Episode> = withContext(Dispatchers.IO) {
@@ -572,7 +637,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.9 (Linux; Android)")
+            .setUserAgent("FrameTV/1.10 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -1068,7 +1133,6 @@ fun NetflixExpandedCard(
     var showPreview by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
 
-    // 1.2 second delay for trailer preview autoplay inside the wide landscape card
     LaunchedEffect(focused) {
         if (focused) {
             delay(1200)
@@ -1078,7 +1142,6 @@ fun NetflixExpandedCard(
         }
     }
 
-    // Smooth width expansion from larger normal poster to 16:9 landscape rectangle
     val landscapeW = height * 1.77f
     val targetWidth = if (isWide) landscapeW * 1.1f else landscapeW
     
@@ -1089,8 +1152,6 @@ fun NetflixExpandedCard(
     )
 
     val shape = RoundedCornerShape(16.dp)
-    
-    // Switch from poster image to wide landscape backdrop when focused/expanded
     val activeImageUrl = if (focused) {
         img(t.backdrop ?: t.poster, "w780")
     } else {
@@ -1099,14 +1160,13 @@ fun NetflixExpandedCard(
 
     val ph = remember(t.id) { placeholder(t.id) }
 
-    // ExoPlayer video preview inside the expanded horizontal landscape card
     val exoPlayer = remember(showPreview, t.key) {
         if (showPreview) {
             ExoPlayer.Builder(ctx).build().apply {
                 val mediaItem = MediaItem.fromUri("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
                 setMediaItem(mediaItem)
                 repeatMode = Player.REPEAT_MODE_ALL
-                volume = 0f // Muted background preview
+                volume = 0f
                 prepare()
                 playWhenReady = true
             }
@@ -1139,7 +1199,6 @@ fun NetflixExpandedCard(
             )
     ) {
         if (showPreview && exoPlayer != null) {
-            // Video playing inside landscape card
             AndroidView(
                 factory = { context ->
                     PlayerView(context).apply {
@@ -1153,7 +1212,6 @@ fun NetflixExpandedCard(
                 },
                 modifier = Modifier.fillMaxSize()
             )
-            // Cinematic Gradient Overlay with Title, Year & Rating
             Box(
                 Modifier
                     .fillMaxSize()
@@ -1206,7 +1264,7 @@ fun NetflixExpandedCard(
     }
 }
 
-// ======================= Detail View =======================
+// ======================= Completely Upgraded Detail Screen =======================
 
 @Composable
 fun DetailScreen(
@@ -1219,7 +1277,6 @@ fun DetailScreen(
     onToggle: () -> Unit
 ) {
     var extra by remember(t.key) { mutableStateOf<TitleExtra?>(null) }
-    var showEpisodes by remember(t.key) { mutableStateOf(false) }
     var season by remember(t.key) { mutableStateOf(1) }
     var eps by remember(t.key) { mutableStateOf<List<Episode>>(emptyList()) }
     val listState = rememberLazyListState()
@@ -1233,30 +1290,31 @@ fun DetailScreen(
         season = e.seasons.firstOrNull()?.number ?: 1
     }
 
-    LaunchedEffect(t.key, season, showEpisodes) {
-        eps = emptyList()
-        if (isShow && showEpisodes) eps = Tmdb.season(t.id, season, tmdbKey)
+    LaunchedEffect(t.key, season) {
+        if (isShow) {
+            eps = Tmdb.season(t.id, season, tmdbKey)
+        }
     }
 
     LaunchedEffect(Unit) { runCatching { playFocus.requestFocus() } }
 
-    val meta = listOfNotNull(
-        t.year.ifEmpty { null },
-        if (isShow) "Series" else "Movie",
-        extra?.runtime?.ifEmpty { null },
-        extra?.genres?.ifEmpty { null }
-    ).joinToString("  ·  ")
+    val playButtonText = when {
+        t.progress > 0f -> "Resume"
+        isShow -> "Play S1:E1"
+        else -> "Play"
+    }
 
     Box(Modifier.fillMaxSize()) {
+        // Cinematic Backdrop with subtle premium dark gradient
         RemoteImage(img(t.backdrop ?: t.poster, "w1280"), Modifier.fillMaxSize())
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF0C0E14),
-                        0.5f to Color(0xFF0C0E14).copy(alpha = 0.82f),
-                        1f to Color(0xFF0C0E14).copy(alpha = 0.1f)
+                        0f to Color(0xFF090A0F),
+                        0.5f to Color(0xFF090A0F).copy(alpha = 0.88f),
+                        1f to Color(0xFF090A0F).copy(alpha = 0.2f)
                     )
                 )
         )
@@ -1265,9 +1323,9 @@ fun DetailScreen(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color.Transparent,
+                        0f to Color(0xFF090A0F).copy(alpha = 0.3f),
                         0.5f to Color.Transparent,
-                        1f to Color(0xFF0C0E14)
+                        1f to Color(0xFF090A0F)
                     )
                 )
         )
@@ -1275,80 +1333,167 @@ fun DetailScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 64.dp, end = 64.dp, top = 120.dp, bottom = 120.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(start = 72.dp, end = 72.dp, top = 80.dp, bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
+            // 1. Title
             item {
                 Text(
                     t.name,
                     color = Color.White,
-                    fontSize = 48.sp,
+                    fontSize = 52.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            // 2. Refined Metadata Row (Year, Type, Runtime, Rating, Genres)
             item {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(meta, color = Color.White.copy(alpha = 0.7f), fontSize = 17.sp)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (t.year.isNotEmpty()) {
+                        MetadataBadge(t.year)
+                    }
+                    MetadataBadge(if (isShow) "Series" else "Movie")
+                    if (extra?.runtime?.isNotEmpty() == true) {
+                        MetadataBadge(extra!!.runtime)
+                    }
                     if (t.rating > 0.0) {
-                        Spacer(Modifier.width(14.dp))
-                        Text(
-                            "★ " + String.format(Locale.US, "%.1f", t.rating),
-                            color = Color.White,
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-            }
-            item {
-                Text(
-                    t.overview.ifEmpty { "No description available." },
-                    color = Color.White.copy(alpha = 0.75f),
-                    fontSize = 17.sp,
-                    lineHeight = 25.sp,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 800.dp)
-                )
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    PillButton("▶  Play", Modifier.focusRequester(playFocus), primary = true, onClick = onPlay)
-                    if (isShow) {
-                        PillButton("Episodes") {
-                            showEpisodes = true
-                            scope.launch { listState.animateScrollToItem(4) }
-                        }
-                    }
-                    PillButton(if (saved) "✓  In My List" else "+  My List", onClick = onToggle)
-                }
-            }
-            if (isShow && showEpisodes) {
-                item {
-                    Spacer(Modifier.height(10.dp))
-                    Text("Episodes", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                }
-                item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(extra?.seasons ?: emptyList(), key = { seasonItem -> seasonItem.number }) { s ->
-                            PillButton("Season ${s.number}", primary = s.number == season) {
-                                season = s.number
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("★", color = Color(0xFFFFC107), fontSize = 18.sp)
+                            Text(
+                                String.format(Locale.US, "%.1f", t.rating),
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if ((extra?.voteCount ?: 0) > 0) {
+                                Text("(${extra?.voteCount})", color = Color.White.copy(alpha = 0.5f), fontSize = 14.sp)
                             }
                         }
                     }
                 }
+            }
+
+            // Genres string
+            if (extra?.genres?.isNotEmpty() == true) {
+                item {
+                    Text(
+                        extra!!.genres,
+                        color = Color.White.copy(alpha = 0.7f),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+
+            // 3. Apple TV Inspired Primary Actions & My List
+            item {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Apple TV Styled Play Button
+                    AppleTvPrimaryButton(
+                        text = playButtonText,
+                        modifier = Modifier.focusRequester(playFocus),
+                        onClick = onPlay
+                    )
+
+                    // Refined My List Button
+                    AppleTvSecondaryButton(
+                        text = if (saved) "In My List" else "My List",
+                        icon = if (saved) "✓" else "+",
+                        onClick = onToggle
+                    )
+                }
+            }
+
+            // 4. TV Series Episodes Section
+            if (isShow) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Episodes",
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                // Season Selector
+                if ((extra?.seasons?.size ?: 0) > 0) {
+                    item {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(extra!!.seasons, key = { it.number }) { s ->
+                                SeasonPill(
+                                    title = s.name,
+                                    selected = s.number == season,
+                                    onClick = { season = s.number }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Episode List Row
                 item {
                     if (eps.isEmpty()) {
-                        Text("Loading episodes…", color = Color.White.copy(alpha = 0.6f), fontSize = 17.sp)
+                        Box(Modifier.height(180.dp), contentAlignment = Alignment.Center) {
+                            Text("Loading episodes...", color = Color.White.copy(alpha = 0.5f), fontSize = 16.sp)
+                        }
                     } else {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-                            items(eps, key = { episodeItem -> episodeItem.number }) { e ->
-                                EpisodeCard(e) {
+                        LazyRow(
+                            horizontalArrangement = Arrangement.spacedBy(20.dp),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            items(eps, key = { it.number }) { e ->
+                                EpisodeCardItem(e) {
                                     onPlayEpisode(t, season, e.number)
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // 5. Polished About & Information Section
+            item {
+                Spacer(Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .appleGlass(RoundedCornerShape(20.dp), false)
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Text("About", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    
+                    Text(
+                        t.overview.ifEmpty { "No overview available." },
+                        color = Color.White.copy(alpha = 0.82f),
+                        fontSize = 16.sp,
+                        lineHeight = 24.sp,
+                        modifier = Modifier.widthIn(max = 900.dp)
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(48.dp)
+                    ) {
+                        if (extra?.director?.isNotEmpty() == true) {
+                            InfoColumn(label = if (isShow) "Creator" else "Director", value = extra!!.director)
+                        }
+                        if (extra?.cast?.isNotEmpty() == true) {
+                            InfoColumn(label = "Starring", value = extra!!.cast)
+                        }
+                        if (extra?.releaseDate?.isNotEmpty() == true) {
+                            InfoColumn(label = "Release Date", value = extra!!.releaseDate)
                         }
                     }
                 }
@@ -1357,21 +1502,150 @@ fun DetailScreen(
     }
 }
 
+// ======================= Refined Detail Sub-Components =======================
+
 @Composable
-fun EpisodeCard(e: Episode, onClick: () -> Unit) {
+fun MetadataBadge(text: String) {
+    Box(
+        Modifier
+            .appleGlass(RoundedCornerShape(8.dp), false)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = Color.White.copy(alpha = 0.9f), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+fun AppleTvPrimaryButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(150), label = "primaryScale")
+    val shape = RoundedCornerShape(50)
+
+    Box(
+        modifier = modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .onFocusChanged { focusState -> focused = focusState.isFocused }
+            .clip(shape)
+            .background(if (focused) Color.White else Color.White.copy(alpha = 0.9f))
+            .border(
+                width = if (focused) 3.dp else 0.dp,
+                brush = Brush.verticalGradient(listOf(Color.White, Color.White.copy(alpha = 0.5f))),
+                shape = shape
+            )
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 32.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("▶", color = Color(0xFF0F111A), fontSize = 16.sp)
+            Text(
+                text,
+                color = Color(0xFF0F111A),
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun AppleTvSecondaryButton(
+    text: String,
+    icon: String,
+    onClick: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused) 1.06f else 1f, tween(150), label = "secScale")
+    val shape = RoundedCornerShape(50)
+
+    Box(
+        modifier = Modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .onFocusChanged { focusState -> focused = focusState.isFocused }
+            .appleGlass(shape, focused)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 15.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(icon, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+@Composable
+fun SeasonPill(title: String, selected: Boolean, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(50)
+    val bg = when {
+        focused -> Color.White.copy(alpha = 0.95f)
+        selected -> Color.White.copy(alpha = 0.25f)
+        else -> Color.White.copy(alpha = 0.08f)
+    }
+
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(bg)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 20.dp, vertical = 10.dp)
+    ) {
+        Text(
+            title,
+            color = if (focused) Color(0xFF0F111A) else Color.White,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
+fun EpisodeCardItem(e: Episode, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(180), label = "epScale")
-    val shape = RoundedCornerShape(16.dp)
-    val url = img(e.still, "w300")
+    val shape = RoundedCornerShape(14.dp)
+    val stillUrl = img(e.still, "w300")
 
-    Column(Modifier.width(260.dp).graphicsLayer { scaleX = scale; scaleY = scale }) {
+    Column(
+        Modifier
+            .width(280.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+    ) {
         Box(
             Modifier
-                .width(260.dp)
-                .height(146.dp)
-                .onFocusChanged { focusState ->
-                    focused = focusState.isFocused
-                }
+                .width(280.dp)
+                .height(158.dp)
+                .onFocusChanged { focused = it.isFocused }
                 .clip(shape)
                 .background(Brush.linearGradient(placeholder(e.number)))
                 .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
@@ -1381,21 +1655,33 @@ fun EpisodeCard(e: Episode, onClick: () -> Unit) {
                     onClick = onClick
                 )
         ) {
-            if (url == null) {
+            if (stillUrl == null) {
                 Text(
                     e.number.toString(),
                     color = Color.White.copy(alpha = 0.25f),
-                    fontSize = 50.sp,
+                    fontSize = 42.sp,
                     fontWeight = FontWeight.Black,
                     modifier = Modifier.align(Alignment.Center)
                 )
             }
-            RemoteImage(url, Modifier.fillMaxSize())
+            RemoteImage(stillUrl, Modifier.fillMaxSize())
+
+            // Episode Number Badge
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .padding(10.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                Text("E${e.number}", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            }
         }
         Spacer(Modifier.height(8.dp))
         Text(
-            "E${e.number}  ${e.name}",
-            color = Color.White.copy(alpha = if (focused) 1f else 0.8f),
+            e.name,
+            color = Color.White.copy(alpha = if (focused) 1f else 0.85f),
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -1406,6 +1692,15 @@ fun EpisodeCard(e: Episode, onClick: () -> Unit) {
             color = Color.White.copy(alpha = 0.5f),
             fontSize = 13.sp
         )
+    }
+}
+
+@Composable
+fun InfoColumn(label: String, value: String) {
+    Column {
+        Text(label.uppercase(Locale.US), color = Color.White.copy(alpha = 0.45f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(value, color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -1656,7 +1951,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.9", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.10", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

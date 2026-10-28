@@ -149,7 +149,8 @@ class TitleExtra(
     val releaseDate: String,
     val director: String,
     val cast: String,
-    val voteCount: Int
+    val voteCount: Int,
+    val logoPath: String?
 )
 
 enum class Tab(val label: String) {
@@ -196,6 +197,12 @@ class Store(ctx: Context) {
 
     fun addRecent(t: Title): List<Title> {
         val l = (listOf(t) + recent().filter { it.key != t.key }).take(15)
+        writeList("recent", l)
+        return l
+    }
+
+    fun removeFromRecent(t: Title): List<Title> {
+        val l = recent().filter { it.key != t.key }
         writeList("recent", l)
         return l
     }
@@ -365,7 +372,7 @@ object Tmdb {
     }
 
     suspend fun details(t: Title, key: String): TitleExtra = withContext(Dispatchers.IO) {
-        val o = get("/${t.type}/${t.id}", key, appendToResponse = "credits") ?: return@withContext TitleExtra("", "", emptyList(), "", "", "", 0)
+        val o = get("/${t.type}/${t.id}", key, appendToResponse = "credits,images") ?: return@withContext TitleExtra("", "", emptyList(), "", "", "", 0, null)
         
         val runtime = if (t.type == "tv") {
             val m = o.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
@@ -415,7 +422,24 @@ object Tmdb {
             (0 until minOf(5, castArr.length())).joinToString(", ") { castArr.getJSONObject(it).optString("name") }
         } else ""
 
-        TitleExtra(runtime, genres, seasons, releaseDate, director, cast, voteCount)
+        // Extract transparent logo path if available
+        val images = o.optJSONObject("images")
+        val logos = images?.optJSONArray("logos")
+        var logoPath: String? = null
+        if (logos != null) {
+            for (i in 0 until logos.length()) {
+                val l = logos.getJSONObject(i)
+                if (l.optString("iso_639_1") == "en" || l.optString("iso_639_1").isEmpty()) {
+                    logoPath = l.optString("file_path")
+                    break
+                }
+            }
+            if (logoPath == null && logos.length() > 0) {
+                logoPath = logos.getJSONObject(0).optString("file_path")
+            }
+        }
+
+        TitleExtra(runtime, genres, seasons, releaseDate, director, cast, voteCount, logoPath)
     }
 
     suspend fun season(id: Int, n: Int, key: String): List<Episode> = withContext(Dispatchers.IO) {
@@ -614,7 +638,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.1 (Linux; Android)")
+            .setUserAgent("FrameTV/2.2 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -862,6 +886,7 @@ fun FrameTvApp() {
                 tmdbKey = tmdbKey,
                 torboxKey = torboxKey,
                 saved = saved.any { it.key == d.key },
+                recentList = recent,
                 onPlay = { 
                     val updatedRecent = store.addRecent(d)
                     recent = updatedRecent
@@ -882,7 +907,12 @@ fun FrameTvApp() {
                         }
                     }
                 },
-                onToggle = { saved = store.toggleSaved(d) }
+                onToggleSaved = { 
+                    saved = store.toggleSaved(d) 
+                },
+                onRemoveRecent = {
+                    recent = store.removeFromRecent(d)
+                }
             )
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -1241,7 +1271,7 @@ fun NetflixExpandedCard(
     }
 }
 
-// ======================= Redesigned Premium Detail Screen =======================
+// ======================= Netflix TV Detail Screen (Full-Screen Artwork & Left Vertical Buttons) =======================
 
 @Composable
 fun DetailScreen(
@@ -1249,18 +1279,21 @@ fun DetailScreen(
     tmdbKey: String,
     torboxKey: String,
     saved: Boolean,
+    recentList: List<Title>,
     onPlay: () -> Unit,
     onPlayEpisode: (Title, Int, Int) -> Unit,
-    onToggle: () -> Unit
+    onToggleSaved: () -> Unit,
+    onRemoveRecent: () -> Unit
 ) {
     var extra by remember(t.key) { mutableStateOf<TitleExtra?>(null) }
     var season by remember(t.key) { mutableStateOf(1) }
     var eps by remember(t.key) { mutableStateOf<List<Episode>>(emptyList()) }
+    var showEpisodeBrowser by remember(t.key) { mutableStateOf(false) }
     var showSeasonPicker by remember(t.key) { mutableStateOf(false) }
-    
-    val listState = rememberLazyListState()
+
     val playFocus = remember { FocusRequester() }
     val isShow = t.type == "tv"
+    val isInContinueWatching = recentList.any { it.key == t.key }
 
     LaunchedEffect(t.key) {
         val e = Tmdb.details(t, tmdbKey)
@@ -1285,211 +1318,289 @@ fun DetailScreen(
     val currentSeasonObj = extra?.seasons?.firstOrNull { it.number == season }
     val currentSeasonName = currentSeasonObj?.name ?: "Season $season"
 
-    Box(Modifier.fillMaxSize()) {
-        // High-End Cinematic Backdrop with Precise Gradients
-        RemoteImage(img(t.backdrop ?: t.poster, "w1280"), Modifier.fillMaxSize())
+    BackHandler(enabled = showEpisodeBrowser) {
+        showEpisodeBrowser = false
+    }
+
+    Box(Modifier.fillMaxSize().background(Color(0xFF141414))) {
+        // 1. Full-Screen Cinematic Backdrop with precise Netflix gradients
+        RemoteImage(img(t.backdrop ?: t.poster, "original"), Modifier.fillMaxSize())
+        
+        // Left gradient shadow for text/button readability
         Box(
             Modifier
-                .fillMaxSize()
+                .fillMaxHeight()
+                .fillMaxWidth(0.65f)
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF08090E),
-                        0.5f to Color(0xFF08090E).copy(alpha = 0.92f),
-                        1f to Color(0xFF08090E).copy(alpha = 0.25f)
+                        0f to Color(0xFF141414).copy(alpha = 0.92f),
+                        0.7f to Color(0xFF141414).copy(alpha = 0.6f),
+                        1f to Color.Transparent
                     )
                 )
         )
+
+        // Bottom gradient shadow
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color(0xFF08090E).copy(alpha = 0.6f),
-                        0.4f to Color.Transparent,
-                        1f to Color(0xFF08090E)
+                        0f to Color.Transparent,
+                        0.6f to Color(0xFF141414).copy(alpha = 0.4f),
+                        1f to Color(0xFF141414)
                     )
                 )
         )
 
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 72.dp, end = 72.dp, top = 64.dp, bottom = 120.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)
-        ) {
-            // 1. Cinematic Introduction Header
-            item {
-                Column(
-                    modifier = Modifier.widthIn(max = 900.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+        if (showEpisodeBrowser) {
+            // Episode Browser Screen (Existing vertical layout preserved)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 64.dp, vertical = 48.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Title
                     Text(
-                        t.name,
+                        "${t.name} — Episodes",
                         color = Color.White,
-                        fontSize = 48.sp,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold
                     )
 
-                    // Single-line Metadata Row
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        if (t.year.isNotEmpty()) {
-                            Text(t.year, color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                            Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                        }
-                        Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        if (extra?.runtime?.isNotEmpty() == true) {
-                            Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                            Text(extra!!.runtime, color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                        if (t.rating > 0.0) {
-                            Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("★", color = Color(0xFFFFC107), fontSize = 16.sp)
-                                Text(
-                                    String.format(Locale.US, "%.1f", t.rating),
-                                    color = Color.White,
-                                    fontSize = 16.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
-                    }
-
-                    // Genres
-                    if (extra?.genres?.isNotEmpty() == true) {
-                        Text(
-                            extra!!.genres,
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium
+                    if ((extra?.seasons?.size ?: 0) > 0) {
+                        NetflixSeasonDropdownTrigger(
+                            currentSeasonName = currentSeasonName,
+                            onClick = { showSeasonPicker = true }
                         )
                     }
+                }
 
-                    Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(20.dp))
 
-                    // Overview Synopsis
-                    Text(
-                        t.overview.ifEmpty { "No overview available." },
-                        color = Color.White.copy(alpha = 0.85f),
-                        fontSize = 16.sp,
-                        lineHeight = 24.sp,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis
-                    )
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Primary Actions Row (Play & My List)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                if (eps.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Loading episodes...", color = Color.White.copy(alpha = 0.5f), fontSize = 18.sp)
+                    }
+                } else {
+                    val epListState = rememberLazyListState()
+                    LazyColumn(
+                        state = epListState,
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(bottom = 60.dp)
                     ) {
-                        StreamPlayButton(
-                            text = playButtonText,
-                            modifier = Modifier.focusRequester(playFocus),
-                            onClick = onPlay
-                        )
-
-                        StreamSecondaryButton(
-                            text = if (saved) "In My List" else "My List",
-                            icon = if (saved) "✓" else "+",
-                            onClick = onToggle
-                        )
+                        itemsIndexed(eps, key = { _, ep -> ep.number }) { _, e ->
+                            val progress = if (t.progress > 0f) t.progress else 0f
+                            VerticalEpisodeRow(
+                                e = e,
+                                progress = progress,
+                                onClick = { onPlayEpisode(t, season, e.number) }
+                            )
+                        }
                     }
                 }
             }
 
-            // 2. TV Series Specific: Season Selector & Vertical Episode List
-            if (isShow) {
-                item {
-                    Spacer(Modifier.height(16.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            "Episodes",
-                            color = Color.White,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+            if (showSeasonPicker && extra?.seasons != null) {
+                SeasonSelectionDialog(
+                    seasons = extra!!.seasons,
+                    currentSeason = season,
+                    onSelect = { selectedSeason ->
+                        season = selectedSeason
+                        showSeasonPicker = false
+                    },
+                    onDismiss = { showSeasonPicker = false }
+                )
+            }
+        } else {
+            // Netflix TV Detail Layout (Logo/Title, Metadata, Synopsis, Left Vertical Buttons)
+            Column(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.6f)
+                    .padding(start = 72.dp, top = 64.dp, bottom = 64.dp),
+                verticalArrangement = Arrangement.Center
+            ) {
+                // Logo or Title
+                val logoUrl = img(extra?.logoPath, "w500")
+                if (logoUrl != null) {
+                    RemoteImage(
+                        logoUrl,
+                        Modifier
+                            .height(110.dp)
+                            .widthIn(max = 420.dp)
+                    )
+                } else {
+                    Text(
+                        t.name,
+                        color = Color.White,
+                        fontSize = 50.sp,
+                        fontWeight = FontWeight.Black,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-                        if ((extra?.seasons?.size ?: 0) > 0) {
-                            SeasonDropdownTrigger(
-                                currentSeasonName = currentSeasonName,
-                                onClick = { showSeasonPicker = true }
+                Spacer(Modifier.height(16.dp))
+
+                // Metadata Row
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    if (t.year.isNotEmpty()) {
+                        Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
+                    }
+                    Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.85f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    if (extra?.runtime?.isNotEmpty() == true) {
+                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
+                        Text(extra!!.runtime, color = Color.White.copy(alpha = 0.85f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                    if (t.rating > 0.0) {
+                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("★", color = Color(0xFFFFC107), fontSize = 16.sp)
+                            Text(
+                                String.format(Locale.US, "%.1f", t.rating),
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
                 }
 
-                if (eps.isEmpty()) {
-                    item {
-                        Box(Modifier.height(120.dp), contentAlignment = Alignment.CenterStart) {
-                            Text("Loading episodes...", color = Color.White.copy(alpha = 0.4f), fontSize = 15.sp)
-                        }
+                if (extra?.genres?.isNotEmpty() == true) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        extra!!.genres,
+                        color = Color.White.copy(alpha = 0.65f),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // Synopsis
+                Text(
+                    t.overview.ifEmpty { "No overview available." },
+                    color = Color.White.copy(alpha = 0.82f),
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.height(28.dp))
+
+                // Left Vertical Netflix Action Stack
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // 1. Primary Play / Resume Button
+                    NetflixActionButton(
+                        text = playButtonText,
+                        icon = "▶",
+                        isPrimary = true,
+                        modifier = Modifier.focusRequester(playFocus),
+                        onClick = onPlay
+                    )
+
+                    // 2. Episodes Button (TV Series Only)
+                    if (isShow) {
+                        NetflixActionButton(
+                            text = "Episodes",
+                            icon = "☰",
+                            isPrimary = false,
+                            onClick = { showEpisodeBrowser = true }
+                        )
                     }
-                } else {
-                    itemsIndexed(eps, key = { _, ep -> ep.number }) { _, e ->
-                        val progress = if (t.progress > 0f) t.progress else 0f
-                        VerticalEpisodeRow(
-                            e = e,
-                            progress = progress,
-                            onClick = { onPlayEpisode(t, season, e.number) }
+
+                    // 3. My List Button
+                    NetflixActionButton(
+                        text = if (saved) "Remove from My List" else "Add to My List",
+                        icon = if (saved) "✓" else "+",
+                        isPrimary = false,
+                        onClick = onToggleSaved
+                    )
+
+                    // 4. Remove from Continue Watching (Conditional)
+                    if (isInContinueWatching) {
+                        NetflixActionButton(
+                            text = "Remove from Continue Watching",
+                            icon = "✕",
+                            isPrimary = false,
+                            onClick = onRemoveRecent
                         )
                     }
                 }
             }
-
-            // 3. Structured Additional Information (Director, Cast, Release Date)
-            item {
-                Spacer(Modifier.height(16.dp))
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth(0.9f)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.04f))
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
-                        .padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text("Information", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(48.dp)
-                    ) {
-                        if (extra?.director?.isNotEmpty() == true) {
-                            InfoMetaItem(label = if (isShow) "Series Creator" else "Director", value = extra!!.director)
-                        }
-                        if (extra?.cast?.isNotEmpty() == true) {
-                            InfoMetaItem(label = "Cast", value = extra!!.cast)
-                        }
-                        if (extra?.releaseDate?.isNotEmpty() == true) {
-                            InfoMetaItem(label = "Release Date", value = extra!!.releaseDate)
-                        }
-                    }
-                }
-            }
         }
+    }
+}
 
-        // Floating Dark Season Selector Dialog
-        if (showSeasonPicker && extra?.seasons != null) {
-            SeasonSelectionDialog(
-                seasons = extra!!.seasons,
-                currentSeason = season,
-                onSelect = { selectedSeason ->
-                    season = selectedSeason
-                    showSeasonPicker = false
-                },
-                onDismiss = { showSeasonPicker = false }
+// ======================= Netflix TV Action Button (White Focus Highlighting) =======================
+
+@Composable
+fun NetflixActionButton(
+    text: String,
+    icon: String,
+    isPrimary: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(8.dp)
+
+    // Netflix D-pad focus rules:
+    // Focused: Solid Bright White background with Dark text/icon.
+    // Unfocused: Translucent dark surface with crisp white text.
+    val background = when {
+        focused -> Color.White
+        isPrimary -> Color.White.copy(alpha = 0.9f)
+        else -> Color.White.copy(alpha = 0.15f)
+    }
+
+    val contentColor = if (focused) Color(0xFF141414) else Color.White
+
+    Box(
+        modifier = modifier
+            .width(360.dp)
+            .clip(shape)
+            .background(background)
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 24.dp, vertical = 15.dp),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            Text(
+                icon,
+                color = contentColor,
+                fontSize = if (icon == "▶") 16.sp else 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text,
+                color = contentColor,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
@@ -1527,7 +1638,6 @@ fun VerticalEpisodeRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // Thumbnail
         Box(
             Modifier
                 .width(220.dp)
@@ -1546,7 +1656,6 @@ fun VerticalEpisodeRow(
             }
             RemoteImage(stillUrl, Modifier.fillMaxSize())
 
-            // Watched Progress Bar Overlay
             if (progress > 0f) {
                 Box(
                     Modifier
@@ -1565,7 +1674,6 @@ fun VerticalEpisodeRow(
             }
         }
 
-        // Episode Information
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -1614,18 +1722,18 @@ fun VerticalEpisodeRow(
 // ======================= Season Dropdown & Dialog =======================
 
 @Composable
-fun SeasonDropdownTrigger(
+fun NetflixSeasonDropdownTrigger(
     currentSeasonName: String,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(8.dp)
 
     Box(
         modifier = Modifier
             .clip(shape)
-            .background(if (focused) Color.White.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
-            .border(1.dp, Color.White.copy(alpha = if (focused) 0.8f else 0.2f), shape)
+            .background(if (focused) Color.White else Color.White.copy(alpha = 0.12f))
+            .border(1.dp, Color.White.copy(alpha = 0.3f), shape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1637,10 +1745,19 @@ fun SeasonDropdownTrigger(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text(currentSeasonName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text("▾", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
+            Text(
+                currentSeasonName,
+                color = if (focused) Color.Black else Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "▾",
+                color = if (focused) Color.Black else Color.White.copy(alpha = 0.7f),
+                fontSize = 13.sp
+            )
         }
     }
 }
@@ -1658,9 +1775,9 @@ fun SeasonSelectionDialog(
         Box(
             modifier = Modifier
                 .width(320.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF14161F))
-                .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color(0xFF181818))
+                .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
                 .padding(20.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1696,13 +1813,13 @@ fun SeasonDialogItem(
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(8.dp)
+    val shape = RoundedCornerShape(6.dp)
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(if (focused) Color.White.copy(alpha = 0.2f) else Color.Transparent)
+            .background(if (focused) Color.White else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1718,92 +1835,14 @@ fun SeasonDialogItem(
         ) {
             Text(
                 season.name,
-                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
+                color = if (focused) Color.Black else if (isSelected) Color.White else Color.White.copy(alpha = 0.7f),
                 fontSize = 15.sp,
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
             )
             if (isSelected) {
-                Text("✓", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                Text("✓", color = if (focused) Color.Black else Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             }
         }
-    }
-}
-
-// ======================= Sub-Components =======================
-
-@Composable
-fun StreamPlayButton(
-    text: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(150), label = "playScale")
-    val shape = RoundedCornerShape(8.dp)
-
-    Box(
-        modifier = modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .onFocusChanged { focused = it.isFocused }
-            .clip(shape)
-            .background(if (focused) Color.White else Color.White.copy(alpha = 0.92f))
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 32.dp, vertical = 14.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text("▶", color = Color.Black, fontSize = 15.sp)
-            Text(text, color = Color.Black, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-        }
-    }
-}
-
-@Composable
-fun StreamSecondaryButton(
-    text: String,
-    icon: String,
-    onClick: () -> Unit
-) {
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(8.dp)
-
-    Box(
-        modifier = Modifier
-            .clip(shape)
-            .background(if (focused) Color.White.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
-            .border(1.dp, Color.White.copy(alpha = if (focused) 0.8f else 0.15f), shape)
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick
-            )
-            .padding(horizontal = 24.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(icon, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-            Text(text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-fun InfoMetaItem(label: String, value: String) {
-    Column {
-        Text(label.uppercase(Locale.US), color = Color.White.copy(alpha = 0.4f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(2.dp))
-        Text(value, color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -2054,7 +2093,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.1", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.2", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

@@ -422,7 +422,6 @@ object Tmdb {
             (0 until minOf(5, castArr.length())).joinToString(", ") { castArr.getJSONObject(it).optString("name") }
         } else ""
 
-        // Extract transparent logo path if available
         val images = o.optJSONObject("images")
         val logos = images?.optJSONArray("logos")
         var logoPath: String? = null
@@ -638,7 +637,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.2 (Linux; Android)")
+            .setUserAgent("FrameTV/2.3 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -1271,7 +1270,7 @@ fun NetflixExpandedCard(
     }
 }
 
-// ======================= Netflix TV Detail Screen (Full-Screen Artwork & Left Vertical Buttons) =======================
+// ======================= Netflix TV Detail Screen (Shifted Higher & Slimmer Buttons on One Screen) =======================
 
 @Composable
 fun DetailScreen(
@@ -1323,7 +1322,7 @@ fun DetailScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF141414))) {
-        // 1. Full-Screen Cinematic Backdrop with precise Netflix gradients
+        // Full-Screen Cinematic Backdrop
         RemoteImage(img(t.backdrop ?: t.poster, "original"), Modifier.fillMaxSize())
         
         // Left gradient shadow for text/button readability
@@ -1333,8 +1332,8 @@ fun DetailScreen(
                 .fillMaxWidth(0.65f)
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF141414).copy(alpha = 0.92f),
-                        0.7f to Color(0xFF141414).copy(alpha = 0.6f),
+                        0f to Color(0xFF141414).copy(alpha = 0.94f),
+                        0.7f to Color(0xFF141414).copy(alpha = 0.65f),
                         1f to Color.Transparent
                     )
                 )
@@ -1347,14 +1346,13 @@ fun DetailScreen(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.6f to Color(0xFF141414).copy(alpha = 0.4f),
+                        0.65f to Color(0xFF141414).copy(alpha = 0.3f),
                         1f to Color(0xFF141414)
                     )
                 )
         )
 
         if (showEpisodeBrowser) {
-            // Episode Browser Screen (Existing vertical layout preserved)
             Column(
                 Modifier
                     .fillMaxSize()
@@ -1418,12 +1416,12 @@ fun DetailScreen(
                 )
             }
         } else {
-            // Netflix TV Detail Layout (Logo/Title, Metadata, Synopsis, Left Vertical Buttons)
+            // Shifted Higher & Single-Screen Layout
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
                     .fillMaxWidth(0.6f)
-                    .padding(start = 72.dp, top = 64.dp, bottom = 64.dp),
+                    .padding(start = 72.dp, top = 36.dp, bottom = 36.dp),
                 verticalArrangement = Arrangement.Center
             ) {
                 // Logo or Title
@@ -1432,44 +1430,44 @@ fun DetailScreen(
                     RemoteImage(
                         logoUrl,
                         Modifier
-                            .height(110.dp)
-                            .widthIn(max = 420.dp)
+                            .height(90.dp)
+                            .widthIn(max = 380.dp)
                     )
                 } else {
                     Text(
                         t.name,
                         color = Color.White,
-                        fontSize = 50.sp,
+                        fontSize = 44.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
 
                 // Metadata Row
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     if (t.year.isNotEmpty()) {
-                        Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
+                        Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 15.sp)
                     }
-                    Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.85f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     if (extra?.runtime?.isNotEmpty() == true) {
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                        Text(extra!!.runtime, color = Color.White.copy(alpha = 0.85f), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 15.sp)
+                        Text(extra!!.runtime, color = Color.White.copy(alpha = 0.85f), fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     }
                     if (t.rating > 0.0) {
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("★", color = Color(0xFFFFC107), fontSize = 16.sp)
+                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 15.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("★", color = Color(0xFFFFC107), fontSize = 15.sp)
                             Text(
                                 String.format(Locale.US, "%.1f", t.rating),
                                 color = Color.White,
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -1477,32 +1475,32 @@ fun DetailScreen(
                 }
 
                 if (extra?.genres?.isNotEmpty() == true) {
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         extra!!.genres,
                         color = Color.White.copy(alpha = 0.65f),
-                        fontSize = 14.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
 
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(12.dp))
 
-                // Synopsis
+                // Synopsis (Compact enough for single screen)
                 Text(
                     t.overview.ifEmpty { "No overview available." },
                     color = Color.White.copy(alpha = 0.82f),
-                    fontSize = 16.sp,
-                    lineHeight = 24.sp,
-                    maxLines = 4,
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(20.dp))
 
-                // Left Vertical Netflix Action Stack
+                // Slimmer Vertical Button Stack
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     // 1. Primary Play / Resume Button
                     NetflixActionButton(
@@ -1546,7 +1544,7 @@ fun DetailScreen(
     }
 }
 
-// ======================= Netflix TV Action Button (White Focus Highlighting) =======================
+// ======================= Slimmer Netflix TV Action Button =======================
 
 @Composable
 fun NetflixActionButton(
@@ -1559,9 +1557,6 @@ fun NetflixActionButton(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
 
-    // Netflix D-pad focus rules:
-    // Focused: Solid Bright White background with Dark text/icon.
-    // Unfocused: Translucent dark surface with crisp white text.
     val background = when {
         focused -> Color.White
         isPrimary -> Color.White.copy(alpha = 0.9f)
@@ -1572,7 +1567,7 @@ fun NetflixActionButton(
 
     Box(
         modifier = modifier
-            .width(360.dp)
+            .width(340.dp)
             .clip(shape)
             .background(background)
             .onFocusChanged { focused = it.isFocused }
@@ -1581,23 +1576,23 @@ fun NetflixActionButton(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 24.dp, vertical = 15.dp),
+            .padding(horizontal = 22.dp, vertical = 10.dp), // Slimmer vertical thickness
         contentAlignment = Alignment.CenterStart
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
                 icon,
                 color = contentColor,
-                fontSize = if (icon == "▶") 16.sp else 18.sp,
+                fontSize = if (icon == "▶") 15.sp else 16.sp,
                 fontWeight = FontWeight.Bold
             )
             Text(
                 text,
                 color = contentColor,
-                fontSize = 17.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -2093,7 +2088,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.2", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.3", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

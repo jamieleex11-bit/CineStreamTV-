@@ -498,7 +498,7 @@ fun placeholder(id: Int): List<Color> {
 class Loaded(val bitmap: Bitmap, val color: Color)
 
 object Img {
-    private val cache = object : LruCache<String, Loaded>(48 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Loaded>(64 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Loaded): Int = value.bitmap.byteCount
     }
 
@@ -508,8 +508,8 @@ object Img {
         return withContext(Dispatchers.IO) {
             try {
                 val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 10000
-                c.readTimeout = 10000
+                c.connectTimeout = 8000
+                c.readTimeout = 8000
                 val bmp = c.inputStream.use { BitmapFactory.decodeStream(it) }
                 if (bmp == null) {
                     null
@@ -532,7 +532,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
         if (url != null) loaded = Img.load(url)
     }
     val bmp = remember(loaded) { loaded?.bitmap?.asImageBitmap() }
-    val fade by animateFloatAsState(if (bmp != null) 1f else 0f, tween(400), label = "imgFade")
+    val fade by animateFloatAsState(if (bmp != null) 1f else 0f, tween(300), label = "imgFade")
     if (bmp != null) {
         Image(
             bitmap = bmp,
@@ -545,7 +545,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
 
 // ======================= Smooth Scrolling =======================
 
-suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 300) {
+suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 250) {
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
     if (item == null) {
         animateScrollToItem(index)
@@ -637,7 +637,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.4 (Linux; Android)")
+            .setUserAgent("FrameTV/2.5 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -1058,7 +1058,7 @@ fun HomeScreen(
                         ContinueWatchingRow(recentList, sz, onOpen)
                     }
                 }
-                items(rows, key = { rowItem -> rowItem.title }) { row ->
+                items(rows, key = { rowItem -> "row-${rowItem.title}" }) { row ->
                     CatalogRow(row, sz, onOpen)
                 }
             }
@@ -1066,7 +1066,7 @@ fun HomeScreen(
     }
 }
 
-// ======================= Netflix-Style Expanding Focus Card Engine =======================
+// ======================= Optimized Netflix-Style Expanding Focus Card Engine =======================
 
 @Composable
 fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
@@ -1089,7 +1089,7 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
                     height = sz.cwH,
                     normalWidth = sz.cwW,
                     isWide = true,
-                    onFocused = { scope.launch { rowState.centerItem(i, 280) } },
+                    onFocused = { scope.launch { rowState.centerItem(i, 220) } },
                     onClick = { onOpen(t) }
                 )
             }
@@ -1111,13 +1111,13 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
             contentPadding = PaddingValues(horizontal = 64.dp),
             horizontalArrangement = Arrangement.spacedBy(32.dp)
         ) {
-            itemsIndexed(row.list, key = { _, titleItem -> titleItem.key }) { i, t ->
+            itemsIndexed(row.list, key = { _, titleItem -> "title-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
                     t = t,
                     height = sz.posterH,
                     normalWidth = sz.posterW,
                     isWide = false,
-                    onFocused = { scope.launch { rowState.centerItem(i, 280) } },
+                    onFocused = { scope.launch { rowState.centerItem(i, 220) } },
                     onClick = { onOpen(t) }
                 )
             }
@@ -1141,7 +1141,7 @@ fun NetflixExpandedCard(
 
     LaunchedEffect(focused) {
         if (focused) {
-            delay(1200)
+            delay(1000)
             showPreview = true
         } else {
             showPreview = false
@@ -1149,11 +1149,11 @@ fun NetflixExpandedCard(
     }
 
     val landscapeW = height * 1.77f
-    val targetWidth = if (isWide) landscapeW * 1.1f else landscapeW
+    val targetWidth = if (isWide) landscapeW * 1.08f else landscapeW
     
     val animatedWidth by animateDpAsState(
         targetValue = if (focused) targetWidth else normalWidth,
-        animationSpec = tween(250, easing = FastOutSlowInEasing),
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
         label = "cardWidth"
     )
 
@@ -1189,7 +1189,7 @@ fun NetflixExpandedCard(
         Modifier
             .width(animatedWidth)
             .height(height)
-            .shadow(if (focused) 32.dp else 4.dp, shape)
+            .shadow(if (focused) 24.dp else 4.dp, shape)
             .zIndex(if (focused) 10f else 1f)
             .onFocusChanged { focusState ->
                 focused = focusState.isFocused
@@ -1270,7 +1270,7 @@ fun NetflixExpandedCard(
     }
 }
 
-// ======================= Netflix TV Detail Screen (Precise D-pad Focus & Liquid Glass) =======================
+// ======================= Netflix TV Detail Screen =======================
 
 @Composable
 fun DetailScreen(
@@ -1322,10 +1322,8 @@ fun DetailScreen(
     }
 
     Box(Modifier.fillMaxSize().background(Color(0xFF141414))) {
-        // Full-Screen Cinematic Backdrop
         RemoteImage(img(t.backdrop ?: t.poster, "original"), Modifier.fillMaxSize())
         
-        // Left gradient shadow for text/button readability
         Box(
             Modifier
                 .fillMaxHeight()
@@ -1339,7 +1337,6 @@ fun DetailScreen(
                 )
         )
 
-        // Bottom gradient shadow
         Box(
             Modifier
                 .fillMaxSize()
@@ -1392,7 +1389,7 @@ fun DetailScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         contentPadding = PaddingValues(bottom = 60.dp)
                     ) {
-                        itemsIndexed(eps, key = { _, ep -> ep.number }) { _, e ->
+                        itemsIndexed(eps, key = { _, ep -> "ep-${ep.number}" }) { _, e ->
                             val progress = if (t.progress > 0f) t.progress else 0f
                             VerticalEpisodeRow(
                                 e = e,
@@ -1423,7 +1420,6 @@ fun DetailScreen(
                     .padding(start = 72.dp, top = 36.dp, bottom = 36.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                // Logo or Title
                 val logoUrl = img(extra?.logoPath, "w500")
                 if (logoUrl != null) {
                     RemoteImage(
@@ -1445,7 +1441,6 @@ fun DetailScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Metadata Row
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -1485,7 +1480,6 @@ fun DetailScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Synopsis
                 Text(
                     t.overview.ifEmpty { "No overview available." },
                     color = Color.White.copy(alpha = 0.82f),
@@ -1497,7 +1491,6 @@ fun DetailScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-                // Slimmer Vertical Button Stack with Liquid Glass & Reliable Focus
                 Column(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
@@ -1552,7 +1545,6 @@ fun NetflixActionButton(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
 
-    // Liquid Glass unfocused styling vs Solid White focused styling
     val background = when {
         focused -> Color.White
         else -> Color(0xFF262626).copy(alpha = 0.7f)
@@ -1790,7 +1782,7 @@ fun SeasonSelectionDialog(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.heightIn(max = 300.dp)
                 ) {
-                    items(seasons, key = { it.number }) { s ->
+                    items(seasons, key = { "season-${it.number}" }) { s ->
                         SeasonDialogItem(
                             season = s,
                             isSelected = s.number == currentSeason,
@@ -2086,7 +2078,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.4", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.5", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

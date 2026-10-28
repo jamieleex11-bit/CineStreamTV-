@@ -37,7 +37,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -158,7 +157,6 @@ enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
-// Optimized fixed sizes for TV layouts to eliminate BoxWithConstraints measurement overhead
 class Sizes(val posterH: Dp = 260.dp, val posterW: Dp = 175.dp, val cwH: Dp = 190.dp, val cwW: Dp = 336.dp)
 val DefaultSizes = Sizes()
 
@@ -230,38 +228,37 @@ object TorBoxScraper {
         episode: Int = 1,
         torboxKey: String
     ): String = withContext(Dispatchers.IO) {
-        if (torboxKey.isNotBlank()) {
-            try {
-                val queryName = if (title.type == "tv") {
-                    "${title.name} S%02dE%02d".format(Locale.US, season, episode)
-                } else {
-                    "${title.name} ${title.year}"
-                }
-                val encodedQuery = URLEncoder.encode(queryName, "UTF-8")
-                val searchUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery&format=list")
-                val conn = searchUrl.openConnection() as HttpURLConnection
-                conn.requestMethod = "GET"
-                conn.setRequestProperty("Authorization", "Bearer $torboxKey")
-                conn.setRequestProperty("accept", "application/json")
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
+        if (torboxKey.isBlank()) return@withContext ""
+        try {
+            val queryName = if (title.type == "tv") {
+                "${title.name} S%02dE%02d".format(Locale.US, season, episode)
+            } else {
+                "${title.name} ${title.year}"
+            }
+            val encodedQuery = URLEncoder.encode(queryName, "UTF-8")
+            val searchUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery&format=list")
+            val conn = searchUrl.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("Authorization", "Bearer $torboxKey")
+            conn.setRequestProperty("accept", "application/json")
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
 
-                if (conn.responseCode == 200) {
-                    val text = conn.inputStream.bufferedReader().use { it.readText() }
-                    val json = JSONObject(text)
-                    if (json.optBoolean("success", false)) {
-                        val data = json.optJSONArray("data")
-                        if (data != null && data.length() > 0) {
-                            val directUrl = data.getJSONObject(0).optString("url", "")
-                            if (directUrl.isNotEmpty()) return@withContext directUrl
-                        }
+            if (conn.responseCode == 200) {
+                val text = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(text)
+                if (json.optBoolean("success", false)) {
+                    val data = json.optJSONArray("data")
+                    if (data != null && data.length() > 0) {
+                        val directUrl = data.getJSONObject(0).optString("url", "")
+                        if (directUrl.isNotEmpty()) return@withContext directUrl
                     }
                 }
-            } catch (e: Exception) {
-                // Fallback stream
             }
+        } catch (e: Exception) {
+            // Error resolving stream
         }
-        "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+        ""
     }
 }
 
@@ -521,7 +518,7 @@ object Img {
 }
 
 @Composable
-fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
+fun RemoteImage(url: String?, modifier: Modifier = Modifier, contentScale: ContentScale = ContentScale.Crop) {
     var loaded by remember(url) { mutableStateOf<Loaded?>(null) }
     LaunchedEffect(url) {
         if (url != null) loaded = Img.load(url)
@@ -532,7 +529,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
         Image(
             bitmap = bmp,
             contentDescription = null,
-            contentScale = ContentScale.Crop,
+            contentScale = contentScale,
             modifier = modifier.graphicsLayer { alpha = fade }
         )
     }
@@ -580,7 +577,7 @@ fun PillButton(
     onClick: () -> Unit = {}
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(120), label = "pillScale")
+    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(120), label = "pillScale")
     val shape = RoundedCornerShape(50)
     
     val modifierLook = if (primary) {
@@ -594,6 +591,7 @@ fun PillButton(
     Box(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
+            .focusable()
             .onFocusChanged { focusState -> focused = focusState.isFocused }
             .then(modifierLook)
             .clickable(
@@ -629,10 +627,11 @@ fun AppleTvPlayerScreen(
     var duration by remember { mutableStateOf(0L) }
     var currentPos by remember { mutableStateOf(0L) }
     var showControls by remember { mutableStateOf(true) }
+    val playPauseFocusRequester = remember { FocusRequester() }
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.6 (Linux; Android)")
+            .setUserAgent("FrameTV/2.7 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -658,7 +657,7 @@ fun AppleTvPlayerScreen(
                 isPlaying = playing
             }
             override fun onPlayerError(error: PlaybackException) {
-                Toast.makeText(ctx, "Stream Error: ${error.message}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(ctx, "Stream Error: ${error.message}", Toast.LENGTH_LONG).show()
             }
         }
         exoPlayer.addListener(listener)
@@ -672,9 +671,12 @@ fun AppleTvPlayerScreen(
     }
 
     LaunchedEffect(showControls, isPlaying) {
-        if (showControls && isPlaying) {
-            delay(4000)
-            showControls = false
+        if (showControls) {
+            runCatching { playPauseFocusRequester.requestFocus() }
+            if (isPlaying) {
+                delay(5000)
+                showControls = false
+            }
         }
     }
 
@@ -754,7 +756,11 @@ fun AppleTvPlayerScreen(
                     PillButton("« 10s") {
                         exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0))
                     }
-                    PillButton(if (isPlaying) "❚❚ Pause" else "▶ Play", primary = true) {
+                    PillButton(
+                        if (isPlaying) "❚❚ Pause" else "▶ Play",
+                        primary = true,
+                        modifier = Modifier.focusRequester(playPauseFocusRequester)
+                    ) {
                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                     }
                     PillButton("10s »") {
@@ -887,7 +893,11 @@ fun FrameTvApp() {
                     CoroutineScope(Dispatchers.IO).launch {
                         val stream = TorBoxScraper.resolveStream(d, 1, 1, torboxKey)
                         withContext(Dispatchers.Main) {
-                            activePlayback = Triple(d.name, d, stream)
+                            if (stream.isNotEmpty()) {
+                                activePlayback = Triple(d.name, d, stream)
+                            } else {
+                                Toast.makeText(ctx, "No cached source found on TorBox. Check your API key.", Toast.LENGTH_LONG).show()
+                            }
                         }
                     }
                 },
@@ -897,7 +907,11 @@ fun FrameTvApp() {
                     CoroutineScope(Dispatchers.IO).launch {
                         val stream = TorBoxScraper.resolveStream(titleObj, sNum, eNum, torboxKey)
                         withContext(Dispatchers.Main) {
-                            activePlayback = Triple("${titleObj.name} S${sNum}E${eNum}", titleObj, stream)
+                            if (stream.isNotEmpty()) {
+                                activePlayback = Triple("${titleObj.name} S${sNum}E${eNum}", titleObj, stream)
+                            } else {
+                                Toast.makeText(ctx, "No cached source found for S${sNum}E${eNum}.", Toast.LENGTH_LONG).show()
+                            }
                         }
                     }
                 },
@@ -1141,7 +1155,6 @@ fun NetflixExpandedCard(
         }
     }
 
-    // Using lightweight scale modifier combined with fixed layout width to avoid heavy recomposition layout thrashing
     val landscapeW = height * 1.77f
     val targetWidth = if (isWide) landscapeW * 1.06f else landscapeW
     
@@ -1420,7 +1433,8 @@ fun DetailScreen(
                         logoUrl,
                         Modifier
                             .height(90.dp)
-                            .widthIn(max = 380.dp)
+                            .widthIn(max = 380.dp),
+                        contentScale = ContentScale.Fit
                     )
                 } else {
                     Text(
@@ -2068,7 +2082,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.6", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.7", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

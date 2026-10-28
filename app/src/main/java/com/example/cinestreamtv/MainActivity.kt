@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
+import android.util.Base64
 import android.util.LruCache
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -67,6 +68,7 @@ import androidx.media3.ui.PlayerView
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 import java.util.Locale
 import kotlin.math.abs
 import kotlinx.coroutines.*
@@ -93,7 +95,8 @@ data class Title(
     val poster: String?,
     val backdrop: String?,
     val progress: Float = 0f,
-    val savedPosMs: Long = 0L
+    val savedPosMs: Long = 0L,
+    val imdbId: String? = null
 ) {
     val key: String get() = "$type-$id"
 
@@ -109,6 +112,7 @@ data class Title(
         o.put("backdrop", backdrop ?: "")
         o.put("progress", progress.toDouble())
         o.put("savedPosMs", savedPosMs)
+        o.put("imdbId", imdbId ?: "")
         return o
     }
 
@@ -123,7 +127,8 @@ data class Title(
             o.optString("poster", "").ifEmpty { null },
             o.optString("backdrop", "").ifEmpty { null },
             o.optDouble("progress", 0.0).toFloat(),
-            o.optLong("savedPosMs", 0L)
+            o.optLong("savedPosMs", 0L),
+            o.optString("imdbId", "").ifEmpty { null }
         )
     }
 }
@@ -150,7 +155,8 @@ class TitleExtra(
     val director: String,
     val cast: String,
     val voteCount: Int,
-    val logoPath: String?
+    val logoPath: String?,
+    val imdbId: String?
 )
 
 enum class Tab(val label: String) {
@@ -217,144 +223,82 @@ class Store(ctx: Context) {
     }
 }
 
-// ======================= Robust TorBox Automatic Discovery Engine =======================
+// ======================= Stremio Debrid Stream Resolver (Comet / Torrentio) =======================
 
-object TorBoxScraper {
-    private const val API_BASE = "https://api.torbox.app/v1/api"
+object DebridStreamResolver {
+    private const val COMET_BASE = "https://comet.elfhosted.com"
+    private const val TORRENTIO_BASE = "https://torrentio.strem.fun"
 
     suspend fun resolveStream(
         title: Title,
+        extra: TitleExtra?,
         season: Int = 1,
         episode: Int = 1,
         torboxKey: String
     ): String = withContext(Dispatchers.IO) {
-        if (torboxKey.isBlank()) return@withContext ""
+        if (torboxKey.isBlank()) return@withContext "ERROR:AUTH_FAIL"
+
+        // Step 1: Resolve target IMDb identifier
+        val targetImdbId = extra?.imdbId ?: title.imdbId
+        val stId = if (!targetImdbId.isNullOrEmpty()) {
+            if (title.type == "tv") "$targetImdbId:$season:$episode" else targetImdbId
+        } else {
+            // Fallback to TMDB identifier if IMDb ID is not present
+            if (title.type == "tv") "tmdb:${title.id}:$season:$episode" else "tmdb:${title.id}"
+        }
+
+        // Step 2: Formulate Base64-encoded configuration for Comet / Torrentio Stremio endpoints
+        val configJson = JSONObject().apply {
+            put("debridService", "torbox")
+            put("debridApiKey", torboxKey.trim())
+            put("debridStreamProxyPassword", "")
+        }
+        val encodedConfig = Base64.encodeToString(
+            configJson.toString().toByteArray(StandardCharsets.UTF_8),
+            Base64.URL_SAFE or Base64.NO_WRAP
+        )
+
+        // Step 3: Query Comet primary addon endpoint
+        val cometUrl = "$COMET_BASE/$encodedConfig/stream/${title.type}/$stId.json"
+        val cometStream = fetchStremioStream(cometUrl)
+        if (cometStream.isNotEmpty()) return@withContext cometStream
+
+        // Step 4: Fallback to Torrentio Stremio endpoint if Comet yields no cached stream
+        val torrentioConfig = "torbox=${torboxKey.trim()}"
+        val torrentioUrl = "$TORRENTIO_BASE/$torrentioConfig/stream/${title.type}/$stId.json"
+        val torrentioStream = fetchStremioStream(torrentioUrl)
+        if (torrentioStream.isNotEmpty()) return@withContext torrentioStream
+
+        ""
+    }
+
+    private fun fetchStremioStream(requestUrl: String): String {
         try {
-            val queryName = if (title.type == "tv") {
-                "${title.name} S%02dE%02d".format(Locale.US, season, episode)
-            } else {
-                "${title.name} ${title.year}"
-            }
-            val encodedQuery = URLEncoder.encode(queryName, "UTF-8")
-
-            // 1. Check cached releases using TorBox's official checkcached endpoint
-            val checkUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery&format=list")
-            val conn = checkUrl.openConnection() as HttpURLConnection
+            val url = URL(requestUrl)
+            val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.setRequestProperty("Authorization", "Bearer $torboxKey")
-            conn.setRequestProperty("accept", "application/json")
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            conn.connectTimeout = 7000
+            conn.readTimeout = 7000
 
-            if (conn.responseCode == 401) {
-                return@withContext "ERROR:AUTH_FAIL"
-            }
-
-            var selectedMagnet: String? = null
             if (conn.responseCode == 200) {
                 val text = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(text)
-                if (json.optBoolean("success", false)) {
-                    val data = json.optJSONArray("data")
-                    if (data != null && data.length() > 0) {
-                        for (i in 0 until data.length()) {
-                            val item = data.optJSONObject(i) ?: continue
-                            val magnet = item.optString("magnet", "").ifEmpty { item.optString("url", "") }
-                            if (magnet.isNotEmpty()) {
-                                selectedMagnet = magnet
-                                break
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (selectedMagnet.isNullOrEmpty()) {
-                // Fallback secondary query format if initial query was too specific
-                val altQuery = URLEncoder.encode(title.name, "UTF-8")
-                val altUrl = URL("$API_BASE/torrents/checkcached?query=$altQuery&format=list")
-                val altConn = altUrl.openConnection() as HttpURLConnection
-                altConn.requestMethod = "GET"
-                altConn.setRequestProperty("Authorization", "Bearer $torboxKey")
-                altConn.setRequestProperty("accept", "application/json")
-                altConn.connectTimeout = 6000
-                altConn.readTimeout = 6000
-
-                if (altConn.responseCode == 200) {
-                    val altText = altConn.inputStream.bufferedReader().use { it.readText() }
-                    val altJson = JSONObject(altText)
-                    val altData = altJson.optJSONArray("data")
-                    if (altData != null && altData.length() > 0) {
-                        selectedMagnet = altData.getJSONObject(0).optString("magnet", "").ifEmpty { altData.getJSONObject(0).optString("url", "") }
-                    }
-                }
-            }
-
-            if (selectedMagnet.isNullOrEmpty()) return@withContext ""
-
-            // 2. Automatically create/add torrent via TorBox API
-            val addUrl = URL("$API_BASE/torrents/createtorrent")
-            val addConn = addUrl.openConnection() as HttpURLConnection
-            addConn.requestMethod = "POST"
-            addConn.doOutput = true
-            addConn.setRequestProperty("Authorization", "Bearer $torboxKey")
-            addConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-
-            val postBody = "magnet=" + URLEncoder.encode(selectedMagnet, "UTF-8") + "&seed=1"
-            addConn.outputStream.use { it.write(postBody.toByteArray()) }
-
-            if (addConn.responseCode == 200) {
-                val addResponse = addConn.inputStream.bufferedReader().use { it.readText() }
-                val addJson = JSONObject(addResponse)
-                val respData = addJson.optJSONObject("data")
-                val torrentId = respData?.optString("torrent_id") ?: respData?.optString("id")
-
-                if (!torrentId.isNullOrEmpty()) {
-                    delay(1000) // Brief pause for torrent indexing
-                    val infoUrl = URL("$API_BASE/torrents/torrentinfo?id=$torrentId")
-                    val infoConn = infoUrl.openConnection() as HttpURLConnection
-                    infoConn.requestMethod = "GET"
-                    infoConn.setRequestProperty("Authorization", "Bearer $torboxKey")
-
-                    if (infoConn.responseCode == 200) {
-                        val infoText = infoConn.inputStream.bufferedReader().use { it.readText() }
-                        val infoJson = JSONObject(infoText)
-                        val files = infoJson.optJSONObject("data")?.optJSONArray("files")
-                        var fileId = ""
-                        if (files != null && files.length() > 0) {
-                            var maxSize = -1L
-                            for (j in 0 until files.length()) {
-                                val f = files.getJSONObject(j)
-                                val sz = f.optLong("size", 0L)
-                                val fname = f.optString("name", "").lowercase()
-                                if ((fname.endsWith(".mp4") || fname.endsWith(".mkv") || fname.endsWith(".avi")) && sz > maxSize) {
-                                    maxSize = sz
-                                    fileId = f.optString("id", "")
-                                }
-                            }
-                            if (fileId.isEmpty()) {
-                                fileId = files.getJSONObject(0).optString("id", "0")
-                            }
-                        }
-
-                        val dlUrl = URL("$API_BASE/torrents/requestdl?token=$torboxKey&torrent_id=$torrentId&file_id=$fileId&redirect=false")
-                        val dlConn = dlUrl.openConnection() as HttpURLConnection
-                        dlConn.requestMethod = "GET"
-                        dlConn.setRequestProperty("Authorization", "Bearer $torboxKey")
-
-                        if (dlConn.responseCode == 200) {
-                            val dlText = dlConn.inputStream.bufferedReader().use { it.readText() }
-                            val dlJson = JSONObject(dlText)
-                            val directLink = dlJson.optString("data", "")
-                            if (directLink.isNotEmpty()) return@withContext directLink
+                val streams = json.optJSONArray("streams")
+                if (streams != null && streams.length() > 0) {
+                    for (i in 0 until streams.length()) {
+                        val streamObj = streams.getJSONObject(i)
+                        val directUrl = streamObj.optString("url", "")
+                        if (directUrl.isNotEmpty() && (directUrl.startsWith("http://") || directUrl.startsWith("https://"))) {
+                            return directUrl
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            // Discovery exception
+            // Error executing stream lookup
         }
-        ""
+        return ""
     }
 }
 
@@ -460,7 +404,7 @@ object Tmdb {
     }
 
     suspend fun details(t: Title, key: String): TitleExtra = withContext(Dispatchers.IO) {
-        val o = get("/${t.type}/${t.id}", key, params = "append_to_response=credits,images") ?: return@withContext TitleExtra("", "", emptyList(), "", "", "", 0, null)
+        val o = get("/${t.type}/${t.id}", key, params = "append_to_response=credits,images,external_ids") ?: return@withContext TitleExtra("", "", emptyList(), "", "", "", 0, null, null)
         
         val runtime = if (t.type == "tv") {
             val m = o.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
@@ -526,7 +470,10 @@ object Tmdb {
             }
         }
 
-        TitleExtra(runtime, genres, seasons, releaseDate, director, cast, voteCount, logoPath)
+        val extIds = o.optJSONObject("external_ids")
+        val imdbId = extIds?.optString("imdb_id")?.ifEmpty { null }
+
+        TitleExtra(runtime, genres, seasons, releaseDate, director, cast, voteCount, logoPath, imdbId)
     }
 
     suspend fun season(id: Int, n: Int, key: String): List<Episode> = withContext(Dispatchers.IO) {
@@ -727,7 +674,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.9 (Linux; Android)")
+            .setUserAgent("FrameTV/3.0 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -983,12 +930,12 @@ fun FrameTvApp() {
                 torboxKey = torboxKey,
                 saved = saved.any { it.key == d.key },
                 recentList = recent,
-                onPlay = { 
+                onPlay = { extraObj ->
                     val updatedRecent = store.addRecent(d)
                     recent = updatedRecent
-                    Toast.makeText(ctx, "Finding sources for ${d.name}...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Searching sources via Comet...", Toast.LENGTH_SHORT).show()
                     CoroutineScope(Dispatchers.IO).launch {
-                        val stream = TorBoxScraper.resolveStream(d, 1, 1, torboxKey)
+                        val stream = DebridStreamResolver.resolveStream(d, extraObj, 1, 1, torboxKey)
                         withContext(Dispatchers.Main) {
                             when {
                                 stream == "ERROR:AUTH_FAIL" -> {
@@ -998,18 +945,18 @@ fun FrameTvApp() {
                                     activePlayback = Triple(d.name, d, stream)
                                 }
                                 else -> {
-                                    Toast.makeText(ctx, "No playable cached sources found for this title.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(ctx, "No playable streams found via Comet/Torrentio.", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
                     }
                 },
-                onPlayEpisode = { titleObj, sNum, eNum ->
+                onPlayEpisode = { titleObj, extraObj, sNum, eNum ->
                     val updatedRecent = store.addRecent(titleObj)
                     recent = updatedRecent
-                    Toast.makeText(ctx, "Finding sources for S${sNum}E${eNum}...", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(ctx, "Searching sources for S${sNum}E${eNum}...", Toast.LENGTH_SHORT).show()
                     CoroutineScope(Dispatchers.IO).launch {
-                        val stream = TorBoxScraper.resolveStream(titleObj, sNum, eNum, torboxKey)
+                        val stream = DebridStreamResolver.resolveStream(titleObj, extraObj, sNum, eNum, torboxKey)
                         withContext(Dispatchers.Main) {
                             when {
                                 stream == "ERROR:AUTH_FAIL" -> {
@@ -1019,7 +966,7 @@ fun FrameTvApp() {
                                     activePlayback = Triple("${titleObj.name} S${sNum}E${eNum}", titleObj, stream)
                                 }
                                 else -> {
-                                    Toast.makeText(ctx, "No playable cached sources found for S${sNum}E${eNum}.", Toast.LENGTH_LONG).show()
+                                    Toast.makeText(ctx, "No playable streams found for S${sNum}E${eNum}.", Toast.LENGTH_LONG).show()
                                 }
                             }
                         }
@@ -1396,8 +1343,8 @@ fun DetailScreen(
     torboxKey: String,
     saved: Boolean,
     recentList: List<Title>,
-    onPlay: () -> Unit,
-    onPlayEpisode: (Title, Int, Int) -> Unit,
+    onPlay: (TitleExtra?) -> Unit,
+    onPlayEpisode: (Title, TitleExtra?, Int, Int) -> Unit,
     onToggleSaved: () -> Unit,
     onRemoveRecent: () -> Unit
 ) {
@@ -1511,7 +1458,7 @@ fun DetailScreen(
                             VerticalEpisodeRow(
                                 e = e,
                                 progress = progress,
-                                onClick = { onPlayEpisode(t, season, e.number) }
+                                onClick = { onPlayEpisode(t, extra, season, e.number) }
                             )
                         }
                     }
@@ -1617,7 +1564,7 @@ fun DetailScreen(
                         icon = "▶",
                         isPrimary = true,
                         modifier = Modifier.focusRequester(playFocus),
-                        onClick = onPlay
+                        onClick = { onPlay(extra) }
                     )
 
                     if (isShow) {
@@ -2156,7 +2103,7 @@ fun ServicesPanel(store: Store, onSaved: () -> Unit) {
         }
         item {
             Text(
-                "Configure your TMDB and TorBox scraper keys below.",
+                "Configure your TMDB and TorBox debrid API keys below.",
                 color = Color.White.copy(alpha = 0.65f),
                 fontSize = 16.sp,
                 lineHeight = 22.sp
@@ -2192,7 +2139,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.9", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 3.0", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",
@@ -2200,7 +2147,7 @@ fun AboutPanel() {
             fontSize = 16.sp
         )
         Text(
-            "Built-in automated source discovery powered directly by TorBox caches.",
+            "Automated debrid streaming engine powered by Comet & Torrentio Stremio protocols.",
             color = Color.White.copy(alpha = 0.6f),
             fontSize = 16.sp
         )

@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import android.util.LruCache
+import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -40,9 +41,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.*
+import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -207,12 +210,13 @@ class Store(ctx: Context) {
         return l
     }
 
-    fun updateProgress(t: Title, currentPosMs: Long, totalDurationMs: Long) {
-        if (totalDurationMs <= 0L) return
-        val pct = (currentPosMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0.05f, 0.98f)
+    fun updateProgress(t: Title, currentPosMs: Long, totalDurationMs: Long): List<Title> {
+        if (totalDurationMs <= 0L) return recent()
+        val pct = (currentPosMs.toFloat() / totalDurationMs.toFloat()).coerceIn(0.01f, 0.98f)
         val updated = t.copy(progress = pct, savedPosMs = currentPosMs)
         val l = (listOf(updated) + recent().filter { it.key != t.key }).take(15)
         writeList("recent", l)
+        return l
     }
 
     fun toggleSaved(t: Title): List<Title> {
@@ -520,7 +524,6 @@ object Tmdb {
             }
         }
         if (youtubeKey.isNullOrEmpty()) return@withContext null
-        // Resolve direct streamable YouTube HLS/MP4 link via Invidious / Piped proxy for ExoPlayer
         resolveYouTubeStreamUrl(youtubeKey)
     }
 
@@ -660,65 +663,56 @@ suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 150) {
     }
 }
 
-// ======================= Styling Helpers =======================
-
-fun Modifier.appleGlass(shape: Shape, focused: Boolean): Modifier = this
-    .clip(shape)
-    .background(
-        Color.White.copy(alpha = if (focused) 0.16f else 0.05f)
-    )
-    .border(
-        width = if (focused) 2.dp else 1.dp,
-        brush = Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = if (focused) 0.7f else 0.15f),
-                Color.White.copy(alpha = if (focused) 0.15f else 0.03f)
-            )
-        ),
-        shape = shape
-    )
+// ======================= Focusable Action Control =======================
 
 @Composable
-fun PillButton(
-    text: String,
-    modifier: Modifier = Modifier,
+fun PlayerControlItem(
+    label: String,
     primary: Boolean = false,
-    onClick: () -> Unit = {}
+    focusRequester: FocusRequester,
+    onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
-    
-    val modifierLook = if (primary) {
-        Modifier
-            .clip(shape)
-            .background(Color.White.copy(alpha = if (focused) 1f else 0.9f))
-    } else {
-        Modifier.appleGlass(shape, focused)
+
+    val background = when {
+        focused -> Color.White
+        primary -> Color.White.copy(alpha = 0.85f)
+        else -> Color.White.copy(alpha = 0.12f)
     }
 
+    val textColor = if (focused) Color.Black else if (primary) Color.Black else Color.White
+
     Box(
-        modifier = modifier
+        modifier = Modifier
+            .focusRequester(focusRequester)
             .focusable()
-            .onFocusChanged { focusState -> focused = focusState.isFocused }
-            .then(modifierLook)
+            .onFocusChanged { focused = it.isFocused }
+            .clip(shape)
+            .background(background)
+            .border(
+                width = if (focused) 3.dp else 1.dp,
+                color = if (focused) Color.White else Color.White.copy(alpha = 0.2f),
+                shape = shape
+            )
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
-            ),
+            )
+            .padding(horizontal = 28.dp, vertical = 14.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
-            text,
-            color = if (primary) Color(0xFF0F111A) else Color.White,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 26.dp, vertical = 12.dp)
+            label,
+            color = textColor,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.Bold
         )
     }
 }
 
-// ======================= Universal Player with 10s Seek & Double-Tap Back =======================
+// ======================= Universal Player =======================
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -730,22 +724,26 @@ fun AppleTvPlayerScreen(
     episode: Int,
     torboxKey: String,
     store: Store,
+    onProgressUpdate: (List<Title>) -> Unit,
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
     var isPlaying by remember { mutableStateOf(false) }
     var duration by remember { mutableStateOf(0L) }
     var currentPos by remember { mutableStateOf(0L) }
+    var activeWatchedMs by remember { mutableStateOf(0L) }
+    var hasQualifiedForRecent by remember { mutableStateOf(false) }
+
     var showControls by remember { mutableStateOf(true) }
-    var resolutionState by remember { mutableStateOf("searching") } // searching, ready, failed
+    var resolutionState by remember { mutableStateOf("searching") }
     var activeStreamUrl by remember { mutableStateOf<String?>(null) }
     var streamCandidateIndex by remember { mutableStateOf(0) }
     var discoveredStreams by remember { mutableStateOf<List<String>>(emptyList()) }
     var lastPlayerBackPress by remember { mutableStateOf(0L) }
 
-    val playPauseFocusRequester = remember { FocusRequester() }
-    val rewindFocusRequester = remember { FocusRequester() }
-    val forwardFocusRequester = remember { FocusRequester() }
+    val playPauseFocus = remember { FocusRequester() }
+    val rewindFocus = remember { FocusRequester() }
+    val forwardFocus = remember { FocusRequester() }
 
     LaunchedEffect(titleObj.key, season, episode) {
         resolutionState = "searching"
@@ -769,7 +767,7 @@ fun AppleTvPlayerScreen(
         if (!url.isNullOrEmpty()) {
             exoPlayer.stop()
             val dataSourceFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent("FrameTV/3.2 (Linux; Android)")
+                .setUserAgent("FrameTV/3.3 (Linux; Android)")
                 .setAllowCrossProtocolRedirects(true)
 
             val uri = Uri.parse(url)
@@ -807,27 +805,40 @@ fun AppleTvPlayerScreen(
         onDispose {
             val pos = exoPlayer.currentPosition
             val dur = exoPlayer.duration
-            store.updateProgress(titleObj, pos, dur)
+            if (hasQualifiedForRecent) {
+                val updatedList = store.updateProgress(titleObj, pos, dur)
+                onProgressUpdate(updatedList)
+            }
             exoPlayer.removeListener(listener)
             exoPlayer.release()
         }
     }
 
-    LaunchedEffect(showControls, isPlaying) {
-        if (showControls) {
-            runCatching { playPauseFocusRequester.requestFocus() }
-            if (isPlaying) {
-                delay(5000)
-                showControls = false
+    // Accumulate actual playback time (2-minute qualification rule)
+    LaunchedEffect(exoPlayer, isPlaying) {
+        while (true) {
+            delay(1000)
+            if (exoPlayer.isPlaying && exoPlayer.playbackState == Player.STATE_READY) {
+                activeWatchedMs += 1000L
+                currentPos = exoPlayer.currentPosition.coerceAtLeast(0L)
+                duration = exoPlayer.duration.coerceAtLeast(0L)
+
+                // 2 Minutes (120,000 ms) threshold check
+                if (!hasQualifiedForRecent && activeWatchedMs >= 120_000L) {
+                    hasQualifiedForRecent = true
+                    val updatedList = store.updateProgress(titleObj, currentPos, duration)
+                    onProgressUpdate(updatedList)
+                } else if (hasQualifiedForRecent) {
+                    val updatedList = store.updateProgress(titleObj, currentPos, duration)
+                    onProgressUpdate(updatedList)
+                }
             }
         }
     }
 
-    LaunchedEffect(exoPlayer) {
-        while (true) {
-            currentPos = exoPlayer.currentPosition.coerceAtLeast(0L)
-            duration = exoPlayer.duration.coerceAtLeast(0L)
-            delay(500)
+    LaunchedEffect(showControls) {
+        if (showControls) {
+            runCatching { playPauseFocus.requestFocus() }
         }
     }
 
@@ -845,6 +856,14 @@ fun AppleTvPlayerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
+                    if (!showControls) {
+                        showControls = true
+                        true
+                    } else false
+                } else false
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
@@ -855,6 +874,7 @@ fun AppleTvPlayerScreen(
                 PlayerView(context).apply {
                     player = exoPlayer
                     useController = false
+                    focusable = android.view.View.NOT_FOCUSABLE
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT
@@ -868,7 +888,7 @@ fun AppleTvPlayerScreen(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.85f)),
+                    .background(Color.Black.copy(alpha = 0.88f)),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -883,7 +903,7 @@ fun AppleTvPlayerScreen(
                         Text("Could not resolve a playable cached stream for this title.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                            PillButton("Retry", primary = true) {
+                            PlayerControlItem("Retry", primary = true, focusRequester = playPauseFocus) {
                                 resolutionState = "searching"
                                 CoroutineScope(Dispatchers.IO).launch {
                                     val streams = DebridStreamResolver.resolveStreams(titleObj, titleExtra, season, episode, torboxKey)
@@ -899,7 +919,7 @@ fun AppleTvPlayerScreen(
                                     }
                                 }
                             }
-                            PillButton("Back", onClick = onBack)
+                            PlayerControlItem("Back", focusRequester = rewindFocus, onClick = onBack)
                         }
                     }
                 }
@@ -917,55 +937,63 @@ fun AppleTvPlayerScreen(
                     .background(
                         Brush.verticalGradient(
                             listOf(
-                                Color.Black.copy(alpha = 0.65f),
+                                Color.Black.copy(alpha = 0.7f),
                                 Color.Transparent,
-                                Color.Black.copy(alpha = 0.8f)
+                                Color.Black.copy(alpha = 0.85f)
                             )
                         )
                     )
                     .padding(48.dp)
             ) {
-                Row(
-                    modifier = Modifier.align(Alignment.TopStart),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        title,
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    title,
+                    color = Color.White,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.align(Alignment.TopStart)
+                )
 
                 Row(
-                    modifier = Modifier.align(Alignment.Center),
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .focusProperties {
+                            exit = { FocusRequester.Default }
+                        },
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    PillButton(
-                        "« 10s",
-                        modifier = Modifier.focusRequester(rewindFocusRequester)
-                    ) {
-                        val target = (exoPlayer.currentPosition - 10000).coerceAtLeast(0L)
-                        exoPlayer.seekTo(target)
-                    }
-                    PillButton(
-                        if (isPlaying) "❚❚ Pause" else "▶ Play",
+                    PlayerControlItem(
+                        label = "« 10s",
+                        focusRequester = rewindFocus,
+                        onClick = {
+                            val pos = exoPlayer.currentPosition
+                            val target = (pos - 10000L).coerceAtLeast(0L)
+                            exoPlayer.seekTo(target)
+                            currentPos = target
+                        }
+                    )
+
+                    PlayerControlItem(
+                        label = if (isPlaying) "❚❚ Pause" else "▶ Play",
                         primary = true,
-                        modifier = Modifier.focusRequester(playPauseFocusRequester)
-                    ) {
-                        if (isPlaying) exoPlayer.pause() else exoPlayer.play()
-                    }
-                    PillButton(
-                        "10s »",
-                        modifier = Modifier.focusRequester(forwardFocusRequester)
-                    ) {
-                        val dur = exoPlayer.duration.coerceAtLeast(0L)
-                        val target = (exoPlayer.currentPosition + 10000).coerceAtMost(if (dur > 0L) dur else currentPos + 10000L)
-                        exoPlayer.seekTo(target)
-                    }
+                        focusRequester = playPauseFocus,
+                        onClick = {
+                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
+                        }
+                    )
+
+                    PlayerControlItem(
+                        label = "10s »",
+                        focusRequester = forwardFocus,
+                        onClick = {
+                            val pos = exoPlayer.currentPosition
+                            val dur = exoPlayer.duration.coerceAtLeast(0L)
+                            val maxDur = if (dur > 0L) dur else pos + 10000L
+                            val target = (pos + 10000L).coerceAtMost(maxDur)
+                            exoPlayer.seekTo(target)
+                            currentPos = target
+                        }
+                    )
                 }
 
                 Column(
@@ -985,7 +1013,9 @@ fun AppleTvPlayerScreen(
                     Slider(
                         value = if (duration > 0) currentPos.toFloat() / duration.toFloat() else 0f,
                         onValueChange = { percent ->
-                            exoPlayer.seekTo((percent * duration).toLong())
+                            val target = (percent * duration).toLong()
+                            exoPlayer.seekTo(target)
+                            currentPos = target
                         },
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
@@ -1081,6 +1111,7 @@ fun FrameTvApp() {
                 episode = playerItem.fifth,
                 torboxKey = torboxKey,
                 store = store,
+                onProgressUpdate = { updatedRecent -> recent = updatedRecent },
                 onBack = { activePlayback = null }
             )
         } else if (d != null) {
@@ -1091,13 +1122,9 @@ fun FrameTvApp() {
                 saved = saved.any { it.key == d.key },
                 recentList = recent,
                 onPlay = { extraObj ->
-                    val updatedRecent = store.addRecent(d)
-                    recent = updatedRecent
                     activePlayback = Quadruple(d.name, d, extraObj, 1, 1)
                 },
                 onPlayEpisode = { titleObj, extraObj, sNum, eNum ->
-                    val updatedRecent = store.addRecent(titleObj)
-                    recent = updatedRecent
                     activePlayback = Quadruple("${titleObj.name} S${sNum}E${eNum}", titleObj, extraObj, sNum, eNum)
                 },
                 onToggleSaved = { 
@@ -1260,7 +1287,7 @@ fun HomeScreen(
     }
 }
 
-// ======================= Stable Focus Card with Delayed Trailer Preview =======================
+// ======================= Focus Card with Debounced Trailer Preview =======================
 
 @Composable
 fun ContinueWatchingRow(list: List<Title>, sz: Sizes, tmdbKey: String, onOpen: (Title) -> Unit) {
@@ -1339,7 +1366,7 @@ fun NetflixExpandedCard(
 
     LaunchedEffect(focused) {
         if (focused) {
-            delay(1200) // 1.2 second delay before attempting trailer fetch & preview
+            delay(1200) // 1.2 second debounce delay before fetching trailer stream
             if (focused) {
                 val url = Tmdb.fetchTrailerUrl(t, tmdbKey)
                 if (focused && !url.isNullOrEmpty()) {
@@ -1415,6 +1442,7 @@ fun NetflixExpandedCard(
                     PlayerView(context).apply {
                         player = exoPlayer
                         useController = false
+                        focusable = android.view.View.NOT_FOCUSABLE
                         layoutParams = FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -1475,7 +1503,7 @@ fun NetflixExpandedCard(
     }
 }
 
-// ======================= Netflix TV Detail Screen =======================
+// ======================= Detail Screen =======================
 
 @Composable
 fun DetailScreen(
@@ -2280,7 +2308,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 3.2", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 3.3", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

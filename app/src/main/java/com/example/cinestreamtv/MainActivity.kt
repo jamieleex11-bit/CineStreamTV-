@@ -163,7 +163,7 @@ enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
-class Sizes(val posterH: Dp = 260.dp, val posterW: Dp = 175.dp, val cwH: Dp = 190.dp, val cwW: Dp = 336.dp)
+class Sizes(val posterH: Dp = 250.dp, val posterW: Dp = 170.dp, val cwH: Dp = 185.dp, val cwW: Dp = 328.dp)
 val DefaultSizes = Sizes()
 
 // ======================= Storage =======================
@@ -260,7 +260,6 @@ object DebridStreamResolver {
 
         val discoveredUrls = mutableListOf<String>()
 
-        // 1. Query Comet instances concurrently
         val cometDeferred = COMET_INSTANCES.map { instance ->
             async {
                 val url = "$instance/$encodedConfig/stream/${title.type}/$stId.json"
@@ -271,7 +270,6 @@ object DebridStreamResolver {
 
         if (discoveredUrls.isNotEmpty()) return@withContext discoveredUrls
 
-        // 2. Fallback to Torrentio if Comet instances return nothing
         val torrentioConfig = "torbox=${torboxKey.trim()}"
         val torrentioUrl = "$TORRENTIO_BASE/$torrentioConfig/stream/${title.type}/$stId.json"
         val torrentioStreams = fetchStreamsFromUrl(torrentioUrl)
@@ -311,7 +309,7 @@ object DebridStreamResolver {
     }
 }
 
-// ======================= TMDB Engine =======================
+// ======================= TMDB Engine & Trailer Resolution =======================
 
 object Tmdb {
     private const val BASE = "https://api.themoviedb.org/3"
@@ -500,6 +498,65 @@ object Tmdb {
             )
         }
     }
+
+    suspend fun fetchTrailerUrl(t: Title, key: String): String? = withContext(Dispatchers.IO) {
+        val o = get("/${t.type}/${t.id}/videos", key) ?: return@withContext null
+        val results = o.optJSONArray("results") ?: return@withContext null
+        var youtubeKey: String? = null
+        for (i in 0 until results.length()) {
+            val v = results.optJSONObject(i) ?: continue
+            if (v.optString("site") == "YouTube" && v.optString("type") == "Trailer") {
+                youtubeKey = v.optString("key")
+                break
+            }
+        }
+        if (youtubeKey == null && results.length() > 0) {
+            for (i in 0 until results.length()) {
+                val v = results.optJSONObject(i) ?: continue
+                if (v.optString("site") == "YouTube") {
+                    youtubeKey = v.optString("key")
+                    break
+                }
+            }
+        }
+        if (youtubeKey.isNullOrEmpty()) return@withContext null
+        // Resolve direct streamable YouTube HLS/MP4 link via Invidious / Piped proxy for ExoPlayer
+        resolveYouTubeStreamUrl(youtubeKey)
+    }
+
+    private fun resolveYouTubeStreamUrl(ytKey: String): String? {
+        val instances = listOf(
+            "https://inv.nadeko.net",
+            "https://vid.priv.au",
+            "https://invidious.jing.rocks"
+        )
+        for (instance in instances) {
+            try {
+                val url = URL("$instance/api/v1/videos/$ytKey")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.connectTimeout = 3000
+                conn.readTimeout = 3000
+                if (conn.responseCode == 200) {
+                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(text)
+                    val adaptiveFormats = json.optJSONArray("adaptiveFormats")
+                    if (adaptiveFormats != null) {
+                        for (i in 0 until adaptiveFormats.length()) {
+                            val f = adaptiveFormats.optJSONObject(i) ?: continue
+                            val type = f.optString("type", "")
+                            val streamUrl = f.optString("url", "")
+                            if (type.contains("video/mp4") && streamUrl.isNotEmpty()) {
+                                return streamUrl
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                continue
+            }
+        }
+        return null
+    }
 }
 
 // ======================= Image Engine =======================
@@ -576,7 +633,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier, contentScale: Conte
         if (url != null) loaded = Img.load(url)
     }
     val bmp = remember(loaded) { loaded?.bitmap?.asImageBitmap() }
-    val fade by animateFloatAsState(if (bmp != null) 1f else 0f, tween(200), label = "imgFade")
+    val fade by animateFloatAsState(if (bmp != null) 1f else 0f, tween(150), label = "imgFade")
     if (bmp != null) {
         Image(
             bitmap = bmp,
@@ -589,7 +646,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier, contentScale: Conte
 
 // ======================= Smooth Scrolling =======================
 
-suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 200) {
+suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 150) {
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
     if (item == null) {
         animateScrollToItem(index)
@@ -608,14 +665,14 @@ suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 200) {
 fun Modifier.appleGlass(shape: Shape, focused: Boolean): Modifier = this
     .clip(shape)
     .background(
-        Color.White.copy(alpha = if (focused) 0.18f else 0.06f)
+        Color.White.copy(alpha = if (focused) 0.16f else 0.05f)
     )
     .border(
         width = if (focused) 2.dp else 1.dp,
         brush = Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = if (focused) 0.8f else 0.2f),
-                Color.White.copy(alpha = if (focused) 0.2f else 0.04f)
+                Color.White.copy(alpha = if (focused) 0.7f else 0.15f),
+                Color.White.copy(alpha = if (focused) 0.15f else 0.03f)
             )
         ),
         shape = shape
@@ -629,7 +686,6 @@ fun PillButton(
     onClick: () -> Unit = {}
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(120), label = "pillScale")
     val shape = RoundedCornerShape(50)
     
     val modifierLook = if (primary) {
@@ -642,7 +698,6 @@ fun PillButton(
 
     Box(
         modifier = modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
             .focusable()
             .onFocusChanged { focusState -> focused = focusState.isFocused }
             .then(modifierLook)
@@ -658,12 +713,12 @@ fun PillButton(
             color = if (primary) Color(0xFF0F111A) else Color.White,
             fontSize = 17.sp,
             fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.padding(horizontal = 28.dp, vertical = 13.dp)
+            modifier = Modifier.padding(horizontal = 26.dp, vertical = 12.dp)
         )
     }
 }
 
-// ======================= Universal Player with Background Stream Resolution =======================
+// ======================= Universal Player with 10s Seek & Double-Tap Back =======================
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -686,10 +741,12 @@ fun AppleTvPlayerScreen(
     var activeStreamUrl by remember { mutableStateOf<String?>(null) }
     var streamCandidateIndex by remember { mutableStateOf(0) }
     var discoveredStreams by remember { mutableStateOf<List<String>>(emptyList()) }
+    var lastPlayerBackPress by remember { mutableStateOf(0L) }
 
     val playPauseFocusRequester = remember { FocusRequester() }
+    val rewindFocusRequester = remember { FocusRequester() }
+    val forwardFocusRequester = remember { FocusRequester() }
 
-    // Background discovery
     LaunchedEffect(titleObj.key, season, episode) {
         resolutionState = "searching"
         val streams = DebridStreamResolver.resolveStreams(titleObj, titleExtra, season, episode, torboxKey)
@@ -707,13 +764,12 @@ fun AppleTvPlayerScreen(
         ExoPlayer.Builder(ctx).build()
     }
 
-    // Handle playback switching when activeStreamUrl changes
     LaunchedEffect(activeStreamUrl) {
         val url = activeStreamUrl
         if (!url.isNullOrEmpty()) {
             exoPlayer.stop()
             val dataSourceFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent("FrameTV/3.1 (Linux; Android)")
+                .setUserAgent("FrameTV/3.2 (Linux; Android)")
                 .setAllowCrossProtocolRedirects(true)
 
             val uri = Uri.parse(url)
@@ -738,7 +794,6 @@ fun AppleTvPlayerScreen(
                 isPlaying = playing
             }
             override fun onPlayerError(error: PlaybackException) {
-                // If current stream fails, try next candidate automatically
                 val nextIdx = streamCandidateIndex + 1
                 if (nextIdx < discoveredStreams.size) {
                     streamCandidateIndex = nextIdx
@@ -776,7 +831,15 @@ fun AppleTvPlayerScreen(
         }
     }
 
-    BackHandler { onBack() }
+    BackHandler {
+        val now = System.currentTimeMillis()
+        if (now - lastPlayerBackPress < 2000L) {
+            onBack()
+        } else {
+            lastPlayerBackPress = now
+            Toast.makeText(ctx, "Press Back again to exit player", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -801,7 +864,6 @@ fun AppleTvPlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Loading or Failure Overlay inside player
         if (resolutionState == "searching" || resolutionState == "failed") {
             Box(
                 Modifier
@@ -867,8 +929,6 @@ fun AppleTvPlayerScreen(
                     modifier = Modifier.align(Alignment.TopStart),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    PillButton("← Back", onClick = onBack)
-                    Spacer(Modifier.width(20.dp))
                     Text(
                         title,
                         color = Color.White,
@@ -884,8 +944,12 @@ fun AppleTvPlayerScreen(
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    PillButton("« 10s") {
-                        exoPlayer.seekTo((exoPlayer.currentPosition - 10000).coerceAtLeast(0))
+                    PillButton(
+                        "« 10s",
+                        modifier = Modifier.focusRequester(rewindFocusRequester)
+                    ) {
+                        val target = (exoPlayer.currentPosition - 10000).coerceAtLeast(0L)
+                        exoPlayer.seekTo(target)
                     }
                     PillButton(
                         if (isPlaying) "❚❚ Pause" else "▶ Play",
@@ -894,8 +958,13 @@ fun AppleTvPlayerScreen(
                     ) {
                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                     }
-                    PillButton("10s »") {
-                        exoPlayer.seekTo((exoPlayer.currentPosition + 10000).coerceAtMost(duration))
+                    PillButton(
+                        "10s »",
+                        modifier = Modifier.focusRequester(forwardFocusRequester)
+                    ) {
+                        val dur = exoPlayer.duration.coerceAtLeast(0L)
+                        val target = (exoPlayer.currentPosition + 10000).coerceAtMost(if (dur > 0L) dur else currentPos + 10000L)
+                        exoPlayer.seekTo(target)
                     }
                 }
 
@@ -1047,6 +1116,7 @@ fun FrameTvApp() {
                             recentList = recent,
                             rows = rows,
                             status = status,
+                            tmdbKey = tmdbKey,
                             onOpen = onOpen
                         )
                         Tab.Search -> SearchScreen(
@@ -1110,7 +1180,6 @@ fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
 @Composable
 fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(120), label = "tabScale")
     val shape = RoundedCornerShape(50)
     val bg = when {
         focused -> Color.White.copy(alpha = 0.95f)
@@ -1119,7 +1188,6 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     }
     Box(
         Modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focusState -> focused = focusState.isFocused }
             .clip(shape)
             .background(bg)
@@ -1165,6 +1233,7 @@ fun HomeScreen(
     recentList: List<Title>,
     rows: List<RowData>,
     status: String,
+    tmdbKey: String,
     onOpen: (Title) -> Unit
 ) {
     val listState = rememberLazyListState()
@@ -1177,44 +1246,45 @@ fun HomeScreen(
             state = listState,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(40.dp)
+            verticalArrangement = Arrangement.spacedBy(36.dp)
         ) {
             if (recentList.isNotEmpty()) {
                 item(key = "continue_watching_shelf") {
-                    ContinueWatchingRow(recentList, sz, onOpen)
+                    ContinueWatchingRow(recentList, sz, tmdbKey, onOpen)
                 }
             }
             items(rows, key = { rowItem -> "row-${rowItem.title}" }) { row ->
-                CatalogRow(row, sz, onOpen)
+                CatalogRow(row, sz, tmdbKey, onOpen)
             }
         }
     }
 }
 
-// ======================= Highly Optimized Focus Card Engine =======================
+// ======================= Stable Focus Card with Delayed Trailer Preview =======================
 
 @Composable
-fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
+fun ContinueWatchingRow(list: List<Title>, sz: Sizes, tmdbKey: String, onOpen: (Title) -> Unit) {
     val rowState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
     Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.height(36.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
-            Text("Continue Watching", color = Color.White.copy(alpha = 0.95f), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.height(32.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
+            Text("Continue Watching", color = Color.White.copy(alpha = 0.95f), fontSize = 23.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(28.dp)
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             itemsIndexed(list, key = { _, titleItem -> "cw-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
                     t = t,
+                    tmdbKey = tmdbKey,
                     height = sz.cwH,
                     normalWidth = sz.cwW,
                     isWide = true,
-                    onFocused = { scope.launch { rowState.centerItem(i, 180) } },
+                    onFocused = { scope.launch { rowState.centerItem(i, 150) } },
                     onClick = { onOpen(t) }
                 )
             }
@@ -1223,26 +1293,27 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
 }
 
 @Composable
-fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
+fun CatalogRow(row: RowData, sz: Sizes, tmdbKey: String, onOpen: (Title) -> Unit) {
     val rowState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth()) {
-        Box(Modifier.height(36.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
-            Text(row.title, color = Color.White.copy(alpha = 0.92f), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Box(Modifier.height(32.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
+            Text(row.title, color = Color.White.copy(alpha = 0.92f), fontSize = 23.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(28.dp)
+            horizontalArrangement = Arrangement.spacedBy(24.dp)
         ) {
             itemsIndexed(row.list, key = { _, titleItem -> "title-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
                     t = t,
+                    tmdbKey = tmdbKey,
                     height = sz.posterH,
                     normalWidth = sz.posterW,
                     isWide = false,
-                    onFocused = { scope.launch { rowState.centerItem(i, 180) } },
+                    onFocused = { scope.launch { rowState.centerItem(i, 150) } },
                     onClick = { onOpen(t) }
                 )
             }
@@ -1254,6 +1325,7 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
 @Composable
 fun NetflixExpandedCard(
     t: Title,
+    tmdbKey: String,
     height: Dp,
     normalWidth: Dp,
     isWide: Boolean,
@@ -1262,27 +1334,35 @@ fun NetflixExpandedCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     var showPreview by remember { mutableStateOf(false) }
+    var trailerUrl by remember { mutableStateOf<String?>(null) }
     val ctx = LocalContext.current
 
     LaunchedEffect(focused) {
         if (focused) {
-            delay(800)
-            showPreview = true
+            delay(1200) // 1.2 second delay before attempting trailer fetch & preview
+            if (focused) {
+                val url = Tmdb.fetchTrailerUrl(t, tmdbKey)
+                if (focused && !url.isNullOrEmpty()) {
+                    trailerUrl = url
+                    showPreview = true
+                }
+            }
         } else {
             showPreview = false
+            trailerUrl = null
         }
     }
 
     val landscapeW = height * 1.77f
-    val targetWidth = if (isWide) landscapeW * 1.06f else landscapeW
+    val targetWidth = if (isWide) landscapeW * 1.04f else landscapeW
     
     val animatedWidth by animateDpAsState(
         targetValue = if (focused) targetWidth else normalWidth,
-        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        animationSpec = tween(140, easing = FastOutSlowInEasing),
         label = "cardWidth"
     )
 
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(12.dp)
     val activeImageUrl = if (focused) {
         img(t.backdrop ?: t.poster, "w500")
     } else {
@@ -1291,13 +1371,13 @@ fun NetflixExpandedCard(
 
     val ph = remember(t.id) { placeholder(t.id) }
 
-    val exoPlayer = remember(showPreview, t.key) {
-        if (showPreview) {
+    val exoPlayer = remember(showPreview, trailerUrl) {
+        if (showPreview && !trailerUrl.isNullOrEmpty()) {
             ExoPlayer.Builder(ctx).build().apply {
-                val mediaItem = MediaItem.fromUri("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
+                val mediaItem = MediaItem.fromUri(trailerUrl!!)
                 setMediaItem(mediaItem)
                 repeatMode = Player.REPEAT_MODE_ALL
-                volume = 0f
+                volume = 0.8f
                 prepare()
                 playWhenReady = true
             }
@@ -1314,22 +1394,22 @@ fun NetflixExpandedCard(
         Modifier
             .width(animatedWidth)
             .height(height)
-            .shadow(if (focused) 18.dp else 2.dp, shape)
-            .zIndex(if (focused) 10f else 1f)
+            .shadow(if (focused) 12.dp else 1.dp, shape)
+            .zIndex(if (focused) 5f else 1f)
             .onFocusChanged { focusState ->
                 focused = focusState.isFocused
                 if (focusState.isFocused) onFocused()
             }
             .clip(shape)
             .background(Brush.linearGradient(ph))
-            .then(if (focused) Modifier.border(2.5.dp, Color.White, shape) else Modifier)
+            .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
     ) {
-        if (showPreview && exoPlayer != null) {
+        if (showPreview && exoPlayer != null && !trailerUrl.isNullOrEmpty()) {
             AndroidView(
                 factory = { context ->
                     PlayerView(context).apply {
@@ -1348,26 +1428,26 @@ fun NetflixExpandedCard(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))
                         )
                     )
-                    .padding(14.dp),
+                    .padding(12.dp),
                 contentAlignment = Alignment.BottomStart
             ) {
                 Column {
                     Text(
                         t.name,
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         "${t.year}  ★ ${String.format(Locale.US, "%.1f", t.rating)}",
                         color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 12.sp
+                        fontSize = 11.sp
                     )
                 }
             }
@@ -1378,8 +1458,8 @@ fun NetflixExpandedCard(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(10.dp)
-                        .height(4.dp)
+                        .padding(8.dp)
+                        .height(3.dp)
                         .clip(RoundedCornerShape(50))
                         .background(Color.Black.copy(alpha = 0.5f))
                 ) {
@@ -2028,12 +2108,12 @@ fun SearchScreen(
                 fontSize = 17.sp,
                 modifier = Modifier.padding(start = 64.dp, top = 20.dp)
             )
-            else -> CatalogRow(rowData, sz, onOpen)
+            else -> CatalogRow(rowData, sz, tmdbKey, onOpen)
         }
     }
 }
 
-// ======================= Library Screen (My List Only) =======================
+// ======================= Library Screen =======================
 
 @Composable
 fun LibraryScreen(
@@ -2063,7 +2143,7 @@ fun LibraryScreen(
             verticalArrangement = Arrangement.spacedBy(28.dp)
         ) {
             item(key = "saved_list") {
-                CatalogRow(RowData("My List", saved), sz, onOpen)
+                CatalogRow(RowData("My List", saved), sz, "", onOpen)
             }
         }
     }
@@ -2200,7 +2280,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 3.1", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 3.2", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

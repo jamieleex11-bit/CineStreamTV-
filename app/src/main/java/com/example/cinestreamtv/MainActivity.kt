@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -36,7 +37,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -149,13 +149,12 @@ enum class Tab(val label: String) {
 
 class Sizes(val posterH: Dp, val posterW: Dp, val cwH: Dp, val cwW: Dp)
 
-// Upgraded to much bigger Netflix-style sizing on 4K/16:9 displays
+// Normal posters made wider & squarer (aspect ratio ~0.82 instead of narrow portrait)
 fun sizesFor(maxH: Dp): Sizes {
-    val ph = maxH * 0.46f // Substantially larger portrait height
-    val pw = ph * 0.68f   // Perfect portrait proportion
-    val cwH = maxH * 0.34f // Larger landscape height for Continue Watching
-    val cwW = cwH * 1.77f  // 16:9 widescreen
-    return Sizes(ph, pw, cwH, cwW)
+    val ph = maxH * 0.42f
+    val pw = ph * 0.82f   // Wider, closer to a square / slightly vertical rectangle
+    val cwH = maxH * 0.32f
+    return Sizes(ph, pw, cwH, cwH * 1.77f)
 }
 
 // ======================= Storage =======================
@@ -573,7 +572,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.7 (Linux; Android)")
+            .setUserAgent("FrameTV/1.8 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -981,7 +980,7 @@ fun HomeScreen(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-                verticalArrangement = Arrangement.spacedBy(40.dp)
+                verticalArrangement = Arrangement.spacedBy(44.dp)
             ) {
                 if (recentList.isNotEmpty()) {
                     item(key = "continue_watching_shelf") {
@@ -996,7 +995,7 @@ fun HomeScreen(
     }
 }
 
-// ======================= Netflix-Style Expanded Focus Card Engine =======================
+// ======================= Netflix-Style Expanding Focus Card Engine =======================
 
 @Composable
 fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
@@ -1016,8 +1015,8 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
             itemsIndexed(list, key = { _, titleItem -> "cw-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
                     t = t,
-                    width = sz.cwW,
                     height = sz.cwH,
+                    normalWidth = sz.cwW,
                     isWide = true,
                     onFocused = { scope.launch { rowState.centerItem(i, 280) } },
                     onClick = { onOpen(t) }
@@ -1039,13 +1038,13 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(26.dp)
+            horizontalArrangement = Arrangement.spacedBy(28.dp)
         ) {
             itemsIndexed(row.list, key = { _, titleItem -> titleItem.key }) { i, t ->
                 NetflixExpandedCard(
                     t = t,
-                    width = sz.posterW,
                     height = sz.posterH,
+                    normalWidth = sz.posterW,
                     isWide = false,
                     onFocused = { scope.launch { rowState.centerItem(i, 280) } },
                     onClick = { onOpen(t) }
@@ -1059,8 +1058,8 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
 @Composable
 fun NetflixExpandedCard(
     t: Title,
-    width: Dp,
     height: Dp,
+    normalWidth: Dp,
     isWide: Boolean,
     onFocused: () -> Unit,
     onClick: () -> Unit
@@ -1069,7 +1068,7 @@ fun NetflixExpandedCard(
     var showPreview by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
 
-    // 1.2 second delay for Netflix-style video preview inside the expanded portrait card
+    // 1.2 second delay for trailer preview autoplay inside the wide landscape card
     LaunchedEffect(focused) {
         if (focused) {
             delay(1200)
@@ -1079,25 +1078,35 @@ fun NetflixExpandedCard(
         }
     }
 
-    // Cinematic Netflix focus scaling animation (1.22x expansion)
-    val scaleAnim by animateFloatAsState(
-        targetValue = if (focused) 1.22f else 1f,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
-        label = "cardScale"
+    // Smooth width expansion from wider normal poster to 16:9 landscape rectangle
+    val landscapeW = height * 1.77f
+    val targetWidth = if (isWide) landscapeW * 1.1f else landscapeW
+    
+    val animatedWidth by animateDpAsState(
+        targetValue = if (focused) targetWidth else normalWidth,
+        animationSpec = tween(250, easing = FastOutSlowInEasing),
+        label = "cardWidth"
     )
 
     val shape = RoundedCornerShape(16.dp)
-    val url = if (isWide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w500")
+    
+    // Switch from poster image to wide landscape backdrop when focused/expanded
+    val activeImageUrl = if (focused) {
+        img(t.backdrop ?: t.poster, "w780")
+    } else {
+        img(t.poster ?: t.backdrop, "w500")
+    }
+
     val ph = remember(t.id) { placeholder(t.id) }
 
-    // ExoPlayer initialized only when expanded preview triggers inside the card
+    // ExoPlayer video preview inside the expanded horizontal landscape card
     val exoPlayer = remember(showPreview, t.key) {
         if (showPreview) {
             ExoPlayer.Builder(ctx).build().apply {
                 val mediaItem = MediaItem.fromUri("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
                 setMediaItem(mediaItem)
                 repeatMode = Player.REPEAT_MODE_ALL
-                volume = 0f // Muted background trailer preview
+                volume = 0f // Muted background preview
                 prepare()
                 playWhenReady = true
             }
@@ -1112,9 +1121,8 @@ fun NetflixExpandedCard(
 
     Box(
         Modifier
-            .width(width)
+            .width(animatedWidth)
             .height(height)
-            .scale(scaleAnim)
             .shadow(if (focused) 32.dp else 4.dp, shape)
             .zIndex(if (focused) 10f else 1f)
             .onFocusChanged { focusState ->
@@ -1131,7 +1139,7 @@ fun NetflixExpandedCard(
             )
     ) {
         if (showPreview && exoPlayer != null) {
-            // Live video trailer playing inside the portrait card bounds
+            // Video playing inside landscape card
             AndroidView(
                 factory = { context ->
                     PlayerView(context).apply {
@@ -1154,28 +1162,28 @@ fun NetflixExpandedCard(
                             listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
                         )
                     )
-                    .padding(14.dp),
+                    .padding(16.dp),
                 contentAlignment = Alignment.BottomStart
             ) {
                 Column {
                     Text(
                         t.name,
                         color = Color.White,
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         "${t.year}  ★ ${String.format(Locale.US, "%.1f", t.rating)}",
                         color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 12.sp
+                        fontSize = 13.sp
                     )
                 }
             }
         } else {
-            RemoteImage(url, Modifier.fillMaxSize())
+            RemoteImage(activeImageUrl, Modifier.fillMaxSize())
             if (isWide && t.progress > 0f) {
                 Box(
                     Modifier
@@ -1648,7 +1656,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.7", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.8", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

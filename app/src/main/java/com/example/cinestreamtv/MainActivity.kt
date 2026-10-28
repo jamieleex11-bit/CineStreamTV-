@@ -217,10 +217,11 @@ class Store(ctx: Context) {
     }
 }
 
-// ======================= TorBox Scraper Engine =======================
+// ======================= Automatic TorBox Discovery Engine =======================
 
 object TorBoxScraper {
     private const val API_BASE = "https://api.torbox.app/v1/api"
+    private const val SEARCH_BASE = "https://search-api.torbox.app"
 
     suspend fun resolveStream(
         title: Title,
@@ -230,33 +231,133 @@ object TorBoxScraper {
     ): String = withContext(Dispatchers.IO) {
         if (torboxKey.isBlank()) return@withContext ""
         try {
+            // Step 1: Formulate search query for automated source discovery
             val queryName = if (title.type == "tv") {
                 "${title.name} S%02dE%02d".format(Locale.US, season, episode)
             } else {
                 "${title.name} ${title.year}"
             }
             val encodedQuery = URLEncoder.encode(queryName, "UTF-8")
-            val searchUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery&format=list")
-            val conn = searchUrl.openConnection() as HttpURLConnection
-            conn.requestMethod = "GET"
-            conn.setRequestProperty("Authorization", "Bearer $torboxKey")
-            conn.setRequestProperty("accept", "application/json")
-            conn.connectTimeout = 6000
-            conn.readTimeout = 6000
 
-            if (conn.responseCode == 200) {
-                val text = conn.inputStream.bufferedReader().use { it.readText() }
-                val json = JSONObject(text)
-                if (json.optBoolean("success", false)) {
-                    val data = json.optJSONArray("data")
-                    if (data != null && data.length() > 0) {
-                        val directUrl = data.getJSONObject(0).optString("url", "")
-                        if (directUrl.isNotEmpty()) return@withContext directUrl
+            // Step 2: Query TorBox Search API for cached releases automatically
+            val searchUrl = URL("$SEARCH_BASE/torrents?q=$encodedQuery&check_cache=true")
+            val searchConn = searchUrl.openConnection() as HttpURLConnection
+            searchConn.requestMethod = "GET"
+            searchConn.setRequestProperty("Authorization", "Bearer $torboxKey")
+            searchConn.setRequestProperty("accept", "application/json")
+            searchConn.connectTimeout = 7000
+            searchConn.readTimeout = 7000
+
+            var magnet: String? = null
+            if (searchConn.responseCode == 200) {
+                val responseText = searchConn.inputStream.bufferedReader().use { it.readText() }
+                val rootJson = JSONObject(responseText)
+                val dataObj = rootJson.opt("data")
+                val resultsArr = when (dataObj) {
+                    is JSONArray -> dataObj
+                    is JSONObject -> dataObj.optJSONArray("torrents") ?: dataObj.optJSONArray("results")
+                    else -> null
+                }
+
+                if (resultsArr != null && resultsArr.length() > 0) {
+                    for (i in 0 until resultsArr.length()) {
+                        val item = resultsArr.optJSONObject(i) ?: continue
+                        val isCached = item.optBoolean("cached", false) || item.optString("cached").equals("true", true)
+                        val candidateMagnet = item.optString("magnet", "").ifEmpty { item.optString("hash", "") }
+                        if (isCached && candidateMagnet.isNotEmpty()) {
+                            magnet = if (candidateMagnet.startsWith("magnet:")) candidateMagnet else "magnet:?xt=urn:btih:$candidateMagnet"
+                            break
+                        }
+                    }
+                }
+            }
+
+            // Fallback direct check if search API results need direct fallback
+            if (magnet == null) {
+                val fallbackUrl = URL("$API_BASE/torrents/checkcached?query=$encodedQuery&format=list")
+                val fbConn = fallbackUrl.openConnection() as HttpURLConnection
+                fbConn.requestMethod = "GET"
+                fbConn.setRequestProperty("Authorization", "Bearer $torboxKey")
+                fbConn.setRequestProperty("accept", "application/json")
+                fbConn.connectTimeout = 6000
+                fbConn.readTimeout = 6000
+
+                if (fbConn.responseCode == 200) {
+                    val text = fbConn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(text)
+                    if (json.optBoolean("success", false)) {
+                        val data = json.optJSONArray("data")
+                        if (data != null && data.length() > 0) {
+                            magnet = data.getJSONObject(0).optString("url", "").ifEmpty { data.getJSONObject(0).optString("magnet", "") }
+                        }
+                    }
+                }
+            }
+
+            // Step 3: If we discovered a playable magnet/source, add it to TorBox account to obtain direct streaming link
+            if (!magnet.isNullOrEmpty()) {
+                val addUrl = URL("$API_BASE/torrents/createtorrent")
+                val addConn = addUrl.openConnection() as HttpURLConnection
+                addConn.requestMethod = "POST"
+                addConn.doOutput = true
+                addConn.setRequestProperty("Authorization", "Bearer $torboxKey")
+                addConn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
+
+                val body = "magnet=" + URLEncoder.encode(magnet, "UTF-8") + "&seed=1"
+                addConn.outputStream.use { it.write(body.toByteArray()) }
+
+                if (addConn.responseCode == 200) {
+                    val addText = addConn.inputStream.bufferedReader().use { it.readText() }
+                    val addJson = JSONObject(addText)
+                    val data = addJson.optJSONObject("data")
+                    val torrentId = data?.optString("torrent_id") ?: data?.optString("id")
+                    
+                    if (!torrentId.isNullOrEmpty()) {
+                        // Request download link for the largest video file inside the torrent
+                        delay(1200) // brief wait for torrent registration
+                        val infoUrl = URL("$API_BASE/torrents/torrentinfo?id=$torrentId")
+                        val infoConn = infoUrl.openConnection() as HttpURLConnection
+                        infoConn.requestMethod = "GET"
+                        infoConn.setRequestProperty("Authorization", "Bearer $torboxKey")
+
+                        if (infoConn.responseCode == 200) {
+                            val infoText = infoConn.inputStream.bufferedReader().use { it.readText() }
+                            val infoJson = JSONObject(infoText)
+                            val files = infoJson.optJSONObject("data")?.optJSONArray("files")
+                            var fileId = ""
+                            if (files != null && files.length() > 0) {
+                                var maxSz = -1L
+                                for (j in 0 until files.length()) {
+                                    val f = files.getJSONObject(j)
+                                    val sz = f.optLong("size", 0L)
+                                    val name = f.optString("name", "").lowercase()
+                                    if ((name.endsWith(".mp4") || name.endsWith(".mkv") || name.endsWith(".avi")) && sz > maxSz) {
+                                        maxSz = sz
+                                        fileId = f.optString("id", "")
+                                    }
+                                }
+                                if (fileId.isEmpty()) {
+                                    fileId = files.getJSONObject(0).optString("id", "0")
+                                }
+                            }
+
+                            val dlUrl = URL("$API_BASE/torrents/requestdl?token=$torboxKey&torrent_id=$torrentId&file_id=$fileId&redirect=false")
+                            val dlConn = dlUrl.openConnection() as HttpURLConnection
+                            dlConn.requestMethod = "GET"
+                            dlConn.setRequestProperty("Authorization", "Bearer $torboxKey")
+
+                            if (dlConn.responseCode == 200) {
+                                val dlText = dlConn.inputStream.bufferedReader().use { it.readText() }
+                                val dlJson = JSONObject(dlText)
+                                val directLink = dlJson.optString("data", "")
+                                if (directLink.isNotEmpty()) return@withContext directLink
+                            }
+                        }
                     }
                 }
             }
         } catch (e: Exception) {
-            // Error resolving stream
+            // Source resolution error
         }
         ""
     }
@@ -631,7 +732,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.7 (Linux; Android)")
+            .setUserAgent("FrameTV/2.8 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -890,13 +991,14 @@ fun FrameTvApp() {
                 onPlay = { 
                     val updatedRecent = store.addRecent(d)
                     recent = updatedRecent
+                    Toast.makeText(ctx, "Discovering sources for ${d.name}...", Toast.LENGTH_SHORT).show()
                     CoroutineScope(Dispatchers.IO).launch {
                         val stream = TorBoxScraper.resolveStream(d, 1, 1, torboxKey)
                         withContext(Dispatchers.Main) {
                             if (stream.isNotEmpty()) {
                                 activePlayback = Triple(d.name, d, stream)
                             } else {
-                                Toast.makeText(ctx, "No cached source found on TorBox. Check your API key.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(ctx, "No playable cached sources discovered. Check your TorBox API key or account status.", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
@@ -904,13 +1006,14 @@ fun FrameTvApp() {
                 onPlayEpisode = { titleObj, sNum, eNum ->
                     val updatedRecent = store.addRecent(titleObj)
                     recent = updatedRecent
+                    Toast.makeText(ctx, "Discovering sources for S${sNum}E${eNum}...", Toast.LENGTH_SHORT).show()
                     CoroutineScope(Dispatchers.IO).launch {
                         val stream = TorBoxScraper.resolveStream(titleObj, sNum, eNum, torboxKey)
                         withContext(Dispatchers.Main) {
                             if (stream.isNotEmpty()) {
                                 activePlayback = Triple("${titleObj.name} S${sNum}E${eNum}", titleObj, stream)
                             } else {
-                                Toast.makeText(ctx, "No cached source found for S${sNum}E${eNum}.", Toast.LENGTH_LONG).show()
+                                Toast.makeText(ctx, "No cached sources discovered for S${sNum}E${eNum}.", Toast.LENGTH_LONG).show()
                             }
                         }
                     }
@@ -2082,7 +2185,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.7", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.8", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",
@@ -2090,7 +2193,7 @@ fun AboutPanel() {
             fontSize = 16.sp
         )
         Text(
-            "Built-in streaming scraper powered directly by TorBox caches.",
+            "Built-in automated source-discovery scraper powered directly by TorBox caches.",
             color = Color.White.copy(alpha = 0.6f),
             fontSize = 16.sp
         )

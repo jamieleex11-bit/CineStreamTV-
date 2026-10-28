@@ -637,7 +637,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.3 (Linux; Android)")
+            .setUserAgent("FrameTV/2.4 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -929,7 +929,7 @@ fun FrameTvApp() {
                             rows.firstOrNull()?.list ?: emptyList(),
                             onOpen
                         )
-                        Tab.Library -> LibraryScreen(saved, recent, onOpen)
+                        Tab.Library -> LibraryScreen(saved, onOpen)
                         Tab.Settings -> SettingsScreen(store) { 
                             tmdbKey = store.get("tmdb")
                             torboxKey = store.get("torbox")
@@ -1270,7 +1270,7 @@ fun NetflixExpandedCard(
     }
 }
 
-// ======================= Netflix TV Detail Screen (Shifted Higher & Slimmer Buttons on One Screen) =======================
+// ======================= Netflix TV Detail Screen (Precise D-pad Focus & Liquid Glass) =======================
 
 @Composable
 fun DetailScreen(
@@ -1416,7 +1416,6 @@ fun DetailScreen(
                 )
             }
         } else {
-            // Shifted Higher & Single-Screen Layout
             Column(
                 modifier = Modifier
                     .fillMaxHeight()
@@ -1486,7 +1485,7 @@ fun DetailScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Synopsis (Compact enough for single screen)
+                // Synopsis
                 Text(
                     t.overview.ifEmpty { "No overview available." },
                     color = Color.White.copy(alpha = 0.82f),
@@ -1498,11 +1497,10 @@ fun DetailScreen(
 
                 Spacer(Modifier.height(20.dp))
 
-                // Slimmer Vertical Button Stack
+                // Slimmer Vertical Button Stack with Liquid Glass & Reliable Focus
                 Column(
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    // 1. Primary Play / Resume Button
                     NetflixActionButton(
                         text = playButtonText,
                         icon = "▶",
@@ -1511,7 +1509,6 @@ fun DetailScreen(
                         onClick = onPlay
                     )
 
-                    // 2. Episodes Button (TV Series Only)
                     if (isShow) {
                         NetflixActionButton(
                             text = "Episodes",
@@ -1521,7 +1518,6 @@ fun DetailScreen(
                         )
                     }
 
-                    // 3. My List Button
                     NetflixActionButton(
                         text = if (saved) "Remove from My List" else "Add to My List",
                         icon = if (saved) "✓" else "+",
@@ -1529,7 +1525,6 @@ fun DetailScreen(
                         onClick = onToggleSaved
                     )
 
-                    // 4. Remove from Continue Watching (Conditional)
                     if (isInContinueWatching) {
                         NetflixActionButton(
                             text = "Remove from Continue Watching",
@@ -1544,7 +1539,7 @@ fun DetailScreen(
     }
 }
 
-// ======================= Slimmer Netflix TV Action Button =======================
+// ======================= Slimmer Liquid Glass Netflix Button =======================
 
 @Composable
 fun NetflixActionButton(
@@ -1557,10 +1552,16 @@ fun NetflixActionButton(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(8.dp)
 
+    // Liquid Glass unfocused styling vs Solid White focused styling
     val background = when {
         focused -> Color.White
-        isPrimary -> Color.White.copy(alpha = 0.9f)
-        else -> Color.White.copy(alpha = 0.15f)
+        else -> Color(0xFF262626).copy(alpha = 0.7f)
+    }
+
+    val border = if (focused) {
+        BorderStroke(1.dp, Color.White)
+    } else {
+        BorderStroke(1.dp, Color.White.copy(alpha = 0.12f))
     }
 
     val contentColor = if (focused) Color(0xFF141414) else Color.White
@@ -1570,13 +1571,14 @@ fun NetflixActionButton(
             .width(340.dp)
             .clip(shape)
             .background(background)
+            .border(border, shape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 22.dp, vertical = 10.dp), // Slimmer vertical thickness
+            .padding(horizontal = 22.dp, vertical = 10.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         Row(
@@ -1915,27 +1917,26 @@ fun SearchScreen(
     }
 }
 
-// ======================= Library Screen =======================
+// ======================= Library Screen (My List Only) =======================
 
 @Composable
 fun LibraryScreen(
     saved: List<Title>,
-    recent: List<Title>,
     onOpen: (Title) -> Unit
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val sz = sizesFor(maxHeight)
-        if (saved.isEmpty() && recent.isEmpty()) {
+        if (saved.isEmpty()) {
             Column(
                 Modifier
                     .fillMaxSize()
                     .padding(start = 64.dp, end = 64.dp, top = 40.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                Text("Nothing here yet", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+                Text("Your List is Empty", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Add titles with My List, and what you play shows up here.",
+                    "Add movies and TV shows to your list to find them here easily.",
                     color = Color.White.copy(alpha = 0.65f),
                     fontSize = 17.sp
                 )
@@ -1943,14 +1944,11 @@ fun LibraryScreen(
         } else {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
+                contentPadding = PaddingValues(top = 24.dp, bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(28.dp)
             ) {
-                if (saved.isNotEmpty()) {
-                    item(key = "saved") { CatalogRow(RowData("My List", saved), sz, onOpen) }
-                }
-                if (recent.isNotEmpty()) {
-                    item(key = "recent") { ContinueWatchingRow(recent, sz, onOpen) }
+                item(key = "saved_list") {
+                    CatalogRow(RowData("My List", saved), sz, onOpen)
                 }
             }
         }
@@ -2088,7 +2086,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.3", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.4", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

@@ -223,31 +223,31 @@ class Store(ctx: Context) {
     }
 }
 
-// ======================= Stremio Debrid Stream Resolver (Comet / Torrentio) =======================
+// ======================= Comet & Torrentio Debrid Stream Resolver =======================
 
 object DebridStreamResolver {
-    private const val COMET_BASE = "https://comet.elfhosted.com"
+    private val COMET_INSTANCES = listOf(
+        "https://comet.elfhosted.com",
+        "https://cometfortheweebs.midnightignite.me"
+    )
     private const val TORRENTIO_BASE = "https://torrentio.strem.fun"
 
-    suspend fun resolveStream(
+    suspend fun resolveStreams(
         title: Title,
         extra: TitleExtra?,
         season: Int = 1,
         episode: Int = 1,
         torboxKey: String
-    ): String = withContext(Dispatchers.IO) {
-        if (torboxKey.isBlank()) return@withContext "ERROR:AUTH_FAIL"
+    ): List<String> = withContext(Dispatchers.IO) {
+        if (torboxKey.isBlank()) return@withContext emptyList()
 
-        // Step 1: Resolve target IMDb identifier
         val targetImdbId = extra?.imdbId ?: title.imdbId
         val stId = if (!targetImdbId.isNullOrEmpty()) {
             if (title.type == "tv") "$targetImdbId:$season:$episode" else targetImdbId
         } else {
-            // Fallback to TMDB identifier if IMDb ID is not present
             if (title.type == "tv") "tmdb:${title.id}:$season:$episode" else "tmdb:${title.id}"
         }
 
-        // Step 2: Formulate Base64-encoded configuration for Comet / Torrentio Stremio endpoints
         val configJson = JSONObject().apply {
             put("debridService", "torbox")
             put("debridApiKey", torboxKey.trim())
@@ -258,47 +258,56 @@ object DebridStreamResolver {
             Base64.URL_SAFE or Base64.NO_WRAP
         )
 
-        // Step 3: Query Comet primary addon endpoint
-        val cometUrl = "$COMET_BASE/$encodedConfig/stream/${title.type}/$stId.json"
-        val cometStream = fetchStremioStream(cometUrl)
-        if (cometStream.isNotEmpty()) return@withContext cometStream
+        val discoveredUrls = mutableListOf<String>()
 
-        // Step 4: Fallback to Torrentio Stremio endpoint if Comet yields no cached stream
+        // 1. Query Comet instances concurrently
+        val cometDeferred = COMET_INSTANCES.map { instance ->
+            async {
+                val url = "$instance/$encodedConfig/stream/${title.type}/$stId.json"
+                fetchStreamsFromUrl(url)
+            }
+        }
+        cometDeferred.awaitAll().flatten().forEach { if (it !in discoveredUrls) discoveredUrls.add(it) }
+
+        if (discoveredUrls.isNotEmpty()) return@withContext discoveredUrls
+
+        // 2. Fallback to Torrentio if Comet instances return nothing
         val torrentioConfig = "torbox=${torboxKey.trim()}"
         val torrentioUrl = "$TORRENTIO_BASE/$torrentioConfig/stream/${title.type}/$stId.json"
-        val torrentioStream = fetchStremioStream(torrentioUrl)
-        if (torrentioStream.isNotEmpty()) return@withContext torrentioStream
+        val torrentioStreams = fetchStreamsFromUrl(torrentioUrl)
+        torrentioStreams.forEach { if (it !in discoveredUrls) discoveredUrls.add(it) }
 
-        ""
+        discoveredUrls
     }
 
-    private fun fetchStremioStream(requestUrl: String): String {
+    private fun fetchStreamsFromUrl(requestUrl: String): List<String> {
+        val list = mutableListOf<String>()
         try {
             val url = URL(requestUrl)
             val conn = url.openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
-            conn.connectTimeout = 7000
-            conn.readTimeout = 7000
+            conn.connectTimeout = 6000
+            conn.readTimeout = 6000
 
             if (conn.responseCode == 200) {
                 val text = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(text)
                 val streams = json.optJSONArray("streams")
-                if (streams != null && streams.length() > 0) {
+                if (streams != null) {
                     for (i in 0 until streams.length()) {
-                        val streamObj = streams.getJSONObject(i)
+                        val streamObj = streams.optJSONObject(i) ?: continue
                         val directUrl = streamObj.optString("url", "")
                         if (directUrl.isNotEmpty() && (directUrl.startsWith("http://") || directUrl.startsWith("https://"))) {
-                            return directUrl
+                            list.add(directUrl)
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            // Error executing stream lookup
+            // Fetch error
         }
-        return ""
+        return list
     }
 }
 
@@ -654,43 +663,72 @@ fun PillButton(
     }
 }
 
-// ======================= Universal Player =======================
+// ======================= Universal Player with Background Stream Resolution =======================
 
 @OptIn(UnstableApi::class)
 @Composable
 fun AppleTvPlayerScreen(
     title: String,
     titleObj: Title,
-    streamUrl: String,
+    titleExtra: TitleExtra?,
+    season: Int,
+    episode: Int,
+    torboxKey: String,
     store: Store,
     onBack: () -> Unit
 ) {
     val ctx = LocalContext.current
-    var isPlaying by remember { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(false) }
     var duration by remember { mutableStateOf(0L) }
     var currentPos by remember { mutableStateOf(0L) }
     var showControls by remember { mutableStateOf(true) }
+    var resolutionState by remember { mutableStateOf("searching") } // searching, ready, failed
+    var activeStreamUrl by remember { mutableStateOf<String?>(null) }
+    var streamCandidateIndex by remember { mutableStateOf(0) }
+    var discoveredStreams by remember { mutableStateOf<List<String>>(emptyList()) }
+
     val playPauseFocusRequester = remember { FocusRequester() }
 
-    val exoPlayer = remember(streamUrl) {
-        val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/3.0 (Linux; Android)")
-            .setAllowCrossProtocolRedirects(true)
-
-        val uri = Uri.parse(streamUrl)
-        val mediaSource = if (streamUrl.contains(".m3u8")) {
-            HlsMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+    // Background discovery
+    LaunchedEffect(titleObj.key, season, episode) {
+        resolutionState = "searching"
+        val streams = DebridStreamResolver.resolveStreams(titleObj, titleExtra, season, episode, torboxKey)
+        discoveredStreams = streams
+        if (streams.isNotEmpty()) {
+            activeStreamUrl = streams[0]
+            streamCandidateIndex = 0
+            resolutionState = "ready"
         } else {
-            ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+            resolutionState = "failed"
         }
+    }
 
-        ExoPlayer.Builder(ctx).build().apply {
-            setMediaSource(mediaSource)
-            prepare()
-            if (titleObj.savedPosMs > 0L) {
-                seekTo(titleObj.savedPosMs)
+    val exoPlayer = remember {
+        ExoPlayer.Builder(ctx).build()
+    }
+
+    // Handle playback switching when activeStreamUrl changes
+    LaunchedEffect(activeStreamUrl) {
+        val url = activeStreamUrl
+        if (!url.isNullOrEmpty()) {
+            exoPlayer.stop()
+            val dataSourceFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent("FrameTV/3.1 (Linux; Android)")
+                .setAllowCrossProtocolRedirects(true)
+
+            val uri = Uri.parse(url)
+            val mediaSource = if (url.contains(".m3u8")) {
+                HlsMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
+            } else {
+                ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(MediaItem.fromUri(uri))
             }
-            playWhenReady = true
+
+            exoPlayer.setMediaSource(mediaSource)
+            exoPlayer.prepare()
+            if (titleObj.savedPosMs > 0L) {
+                exoPlayer.seekTo(titleObj.savedPosMs)
+            }
+            exoPlayer.playWhenReady = true
         }
     }
 
@@ -700,7 +738,14 @@ fun AppleTvPlayerScreen(
                 isPlaying = playing
             }
             override fun onPlayerError(error: PlaybackException) {
-                Toast.makeText(ctx, "Playback Error: ${error.message}", Toast.LENGTH_LONG).show()
+                // If current stream fails, try next candidate automatically
+                val nextIdx = streamCandidateIndex + 1
+                if (nextIdx < discoveredStreams.size) {
+                    streamCandidateIndex = nextIdx
+                    activeStreamUrl = discoveredStreams[nextIdx]
+                } else {
+                    resolutionState = "failed"
+                }
             }
         }
         exoPlayer.addListener(listener)
@@ -756,8 +801,51 @@ fun AppleTvPlayerScreen(
             modifier = Modifier.fillMaxSize()
         )
 
+        // Loading or Failure Overlay inside player
+        if (resolutionState == "searching" || resolutionState == "failed") {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.85f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    if (resolutionState == "searching") {
+                        Text("Finding streams via Comet/Torrentio...", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text("Please wait while we resolve your media source.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+                    } else {
+                        Text("Playback Failed / No Sources Found", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text("Could not resolve a playable cached stream for this title.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            PillButton("Retry", primary = true) {
+                                resolutionState = "searching"
+                                CoroutineScope(Dispatchers.IO).launch {
+                                    val streams = DebridStreamResolver.resolveStreams(titleObj, titleExtra, season, episode, torboxKey)
+                                    withContext(Dispatchers.Main) {
+                                        discoveredStreams = streams
+                                        if (streams.isNotEmpty()) {
+                                            streamCandidateIndex = 0
+                                            activeStreamUrl = streams[0]
+                                            resolutionState = "ready"
+                                        } else {
+                                            resolutionState = "failed"
+                                        }
+                                    }
+                                }
+                            }
+                            PillButton("Back", onClick = onBack)
+                        }
+                    }
+                }
+            }
+        }
+
         AnimatedVisibility(
-            visible = showControls,
+            visible = showControls && resolutionState == "ready",
             enter = fadeIn(tween(150)),
             exit = fadeOut(tween(150))
         ) {
@@ -864,7 +952,7 @@ fun FrameTvApp() {
     var recent by remember { mutableStateOf(store.recent()) }
     var saved by remember { mutableStateOf(store.saved()) }
     var detail by remember { mutableStateOf<Title?>(null) }
-    var activePlayback by remember { mutableStateOf<Triple<String, Title, String>?>(null) }
+    var activePlayback by remember { mutableStateOf<Quadruple<String, Title, TitleExtra?, Int, Int>?>(null) }
     var lastBackPress by remember { mutableStateOf(0L) }
     
     val baseBackground = Brush.verticalGradient(
@@ -919,7 +1007,10 @@ fun FrameTvApp() {
             AppleTvPlayerScreen(
                 title = playerItem.first,
                 titleObj = playerItem.second,
-                streamUrl = playerItem.third,
+                titleExtra = playerItem.third,
+                season = playerItem.fourth,
+                episode = playerItem.fifth,
+                torboxKey = torboxKey,
                 store = store,
                 onBack = { activePlayback = null }
             )
@@ -933,44 +1024,12 @@ fun FrameTvApp() {
                 onPlay = { extraObj ->
                     val updatedRecent = store.addRecent(d)
                     recent = updatedRecent
-                    Toast.makeText(ctx, "Searching sources via Comet...", Toast.LENGTH_SHORT).show()
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val stream = DebridStreamResolver.resolveStream(d, extraObj, 1, 1, torboxKey)
-                        withContext(Dispatchers.Main) {
-                            when {
-                                stream == "ERROR:AUTH_FAIL" -> {
-                                    Toast.makeText(ctx, "TorBox authentication failed. Check your API key in Settings.", Toast.LENGTH_LONG).show()
-                                }
-                                stream.isNotEmpty() -> {
-                                    activePlayback = Triple(d.name, d, stream)
-                                }
-                                else -> {
-                                    Toast.makeText(ctx, "No playable streams found via Comet/Torrentio.", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }
-                    }
+                    activePlayback = Quadruple(d.name, d, extraObj, 1, 1)
                 },
                 onPlayEpisode = { titleObj, extraObj, sNum, eNum ->
                     val updatedRecent = store.addRecent(titleObj)
                     recent = updatedRecent
-                    Toast.makeText(ctx, "Searching sources for S${sNum}E${eNum}...", Toast.LENGTH_SHORT).show()
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val stream = DebridStreamResolver.resolveStream(titleObj, extraObj, sNum, eNum, torboxKey)
-                        withContext(Dispatchers.Main) {
-                            when {
-                                stream == "ERROR:AUTH_FAIL" -> {
-                                    Toast.makeText(ctx, "TorBox authentication failed. Check your API key in Settings.", Toast.LENGTH_LONG).show()
-                                }
-                                stream.isNotEmpty() -> {
-                                    activePlayback = Triple("${titleObj.name} S${sNum}E${eNum}", titleObj, stream)
-                                }
-                                else -> {
-                                    Toast.makeText(ctx, "No playable streams found for S${sNum}E${eNum}.", Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }
-                    }
+                    activePlayback = Quadruple("${titleObj.name} S${sNum}E${eNum}", titleObj, extraObj, sNum, eNum)
                 },
                 onToggleSaved = { 
                     saved = store.toggleSaved(d) 
@@ -1006,6 +1065,8 @@ fun FrameTvApp() {
         }
     }
 }
+
+data class Quadruple<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
 // ======================= Top Navigation Header =======================
 
@@ -2139,7 +2200,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 3.0", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 3.1", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",
@@ -2147,7 +2208,7 @@ fun AboutPanel() {
             fontSize = 16.sp
         )
         Text(
-            "Automated debrid streaming engine powered by Comet & Torrentio Stremio protocols.",
+            "Instant debrid streaming engine powered by Comet & Torrentio protocols.",
             color = Color.White.copy(alpha = 0.6f),
             fontSize = 16.sp
         )

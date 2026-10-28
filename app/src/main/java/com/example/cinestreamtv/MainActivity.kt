@@ -614,7 +614,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.0 (Linux; Android)")
+            .setUserAgent("FrameTV/2.1 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -1241,7 +1241,7 @@ fun NetflixExpandedCard(
     }
 }
 
-// ======================= Netflix-Style Vertical Detail Screen =======================
+// ======================= Redesigned Premium Detail Screen =======================
 
 @Composable
 fun DetailScreen(
@@ -1286,16 +1286,16 @@ fun DetailScreen(
     val currentSeasonName = currentSeasonObj?.name ?: "Season $season"
 
     Box(Modifier.fillMaxSize()) {
-        // Dark Cinematic Backdrop
+        // High-End Cinematic Backdrop with Precise Gradients
         RemoteImage(img(t.backdrop ?: t.poster, "w1280"), Modifier.fillMaxSize())
         Box(
             Modifier
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF090A0F),
-                        0.55f to Color(0xFF090A0F).copy(alpha = 0.92f),
-                        1f to Color(0xFF090A0F).copy(alpha = 0.35f)
+                        0f to Color(0xFF08090E),
+                        0.5f to Color(0xFF08090E).copy(alpha = 0.92f),
+                        1f to Color(0xFF08090E).copy(alpha = 0.25f)
                     )
                 )
         )
@@ -1304,9 +1304,9 @@ fun DetailScreen(
                 .fillMaxSize()
                 .background(
                     Brush.verticalGradient(
-                        0f to Color(0xFF090A0F).copy(alpha = 0.5f),
+                        0f to Color(0xFF08090E).copy(alpha = 0.6f),
                         0.4f to Color.Transparent,
-                        1f to Color(0xFF090A0F)
+                        1f to Color(0xFF08090E)
                     )
                 )
         )
@@ -1314,107 +1314,130 @@ fun DetailScreen(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 64.dp, end = 64.dp, top = 64.dp, bottom = 100.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            contentPadding = PaddingValues(start = 72.dp, end = 72.dp, top = 64.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
-            // 1. Title
+            // 1. Cinematic Introduction Header
             item {
-                Text(
-                    t.name,
-                    color = Color.White,
-                    fontSize = 46.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // 2. Clean Metadata Row
-            item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                Column(
+                    modifier = Modifier.widthIn(max = 900.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    if (t.year.isNotEmpty()) {
-                        Text(t.year, color = Color.White.copy(alpha = 0.75f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                    }
-                    Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.75f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    if (extra?.runtime?.isNotEmpty() == true) {
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                        Text(extra!!.runtime, color = Color.White.copy(alpha = 0.75f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                    if (t.rating > 0.0) {
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("★", color = Color(0xFFFFC107), fontSize = 16.sp)
-                            Text(
-                                String.format(Locale.US, "%.1f", t.rating),
-                                color = Color.White,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                    // Title
+                    Text(
+                        t.name,
+                        color = Color.White,
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    // Single-line Metadata Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        if (t.year.isNotEmpty()) {
+                            Text(t.year, color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                            Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
+                        }
+                        Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        if (extra?.runtime?.isNotEmpty() == true) {
+                            Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
+                            Text(extra!!.runtime, color = Color.White.copy(alpha = 0.8f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        if (t.rating > 0.0) {
+                            Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 16.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("★", color = Color(0xFFFFC107), fontSize = 16.sp)
+                                Text(
+                                    String.format(Locale.US, "%.1f", t.rating),
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
-                }
-            }
 
-            // Genres
-            if (extra?.genres?.isNotEmpty() == true) {
-                item {
+                    // Genres
+                    if (extra?.genres?.isNotEmpty() == true) {
+                        Text(
+                            extra!!.genres,
+                            color = Color.White.copy(alpha = 0.6f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+
+                    // Overview Synopsis
                     Text(
-                        extra!!.genres,
-                        color = Color.White.copy(alpha = 0.55f),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                }
-            }
-
-            // 3. Primary Action Row
-            item {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Refined Play Button
-                    NetflixPrimaryPlayButton(
-                        text = playButtonText,
-                        modifier = Modifier.focusRequester(playFocus),
-                        onClick = onPlay
+                        t.overview.ifEmpty { "No overview available." },
+                        color = Color.White.copy(alpha = 0.85f),
+                        fontSize = 16.sp,
+                        lineHeight = 24.sp,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
                     )
 
-                    // Compact Season Selector Dropdown Trigger
-                    if (isShow && (extra?.seasons?.size ?: 0) > 0) {
-                        SeasonDropdownTrigger(
-                            currentSeasonName = currentSeasonName,
-                            onClick = { showSeasonPicker = true }
+                    Spacer(Modifier.height(8.dp))
+
+                    // Primary Actions Row (Play & My List)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StreamPlayButton(
+                            text = playButtonText,
+                            modifier = Modifier.focusRequester(playFocus),
+                            onClick = onPlay
+                        )
+
+                        StreamSecondaryButton(
+                            text = if (saved) "In My List" else "My List",
+                            icon = if (saved) "✓" else "+",
+                            onClick = onToggle
                         )
                     }
                 }
             }
 
-            // 4. Vertical Netflix Episode List (For TV Series)
+            // 2. TV Series Specific: Season Selector & Vertical Episode List
             if (isShow) {
                 item {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "Episodes",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Spacer(Modifier.height(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Episodes",
+                            color = Color.White,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+
+                        if ((extra?.seasons?.size ?: 0) > 0) {
+                            SeasonDropdownTrigger(
+                                currentSeasonName = currentSeasonName,
+                                onClick = { showSeasonPicker = true }
+                            )
+                        }
+                    }
                 }
 
                 if (eps.isEmpty()) {
                     item {
-                        Box(Modifier.height(100.dp), contentAlignment = Alignment.CenterStart) {
+                        Box(Modifier.height(120.dp), contentAlignment = Alignment.CenterStart) {
                             Text("Loading episodes...", color = Color.White.copy(alpha = 0.4f), fontSize = 15.sp)
                         }
                     }
                 } else {
                     itemsIndexed(eps, key = { _, ep -> ep.number }) { _, e ->
-                        // Episode progress mapping if it matches active title
                         val progress = if (t.progress > 0f) t.progress else 0f
                         VerticalEpisodeRow(
                             e = e,
@@ -1425,47 +1448,29 @@ fun DetailScreen(
                 }
             }
 
-            // 5. My List Button
+            // 3. Structured Additional Information (Director, Cast, Release Date)
             item {
-                Spacer(Modifier.height(8.dp))
-                NetflixSecondaryButton(
-                    text = if (saved) "In My List" else "Add to My List",
-                    icon = if (saved) "✓" else "+",
-                    onClick = onToggle
-                )
-            }
-
-            // 6. About & Info Panel
-            item {
+                Spacer(Modifier.height(16.dp))
                 Column(
                     modifier = Modifier
-                        .fillMaxWidth(0.85f)
+                        .fillMaxWidth(0.9f)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color.White.copy(alpha = 0.05f))
+                        .background(Color.White.copy(alpha = 0.04f))
                         .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
                         .padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text("About ${t.name}", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    
-                    Text(
-                        t.overview.ifEmpty { "No description available." },
-                        color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp
-                    )
-
-                    Spacer(Modifier.height(4.dp))
+                    Text("Information", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(40.dp)
+                        horizontalArrangement = Arrangement.spacedBy(48.dp)
                     ) {
                         if (extra?.director?.isNotEmpty() == true) {
-                            InfoMetaItem(label = if (isShow) "Creator" else "Director", value = extra!!.director)
+                            InfoMetaItem(label = if (isShow) "Series Creator" else "Director", value = extra!!.director)
                         }
                         if (extra?.cast?.isNotEmpty() == true) {
-                            InfoMetaItem(label = "Starring", value = extra!!.cast)
+                            InfoMetaItem(label = "Cast", value = extra!!.cast)
                         }
                         if (extra?.releaseDate?.isNotEmpty() == true) {
                             InfoMetaItem(label = "Release Date", value = extra!!.releaseDate)
@@ -1522,7 +1527,7 @@ fun VerticalEpisodeRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // Thumbnail Column
+        // Thumbnail
         Box(
             Modifier
                 .width(220.dp)
@@ -1560,7 +1565,7 @@ fun VerticalEpisodeRow(
             }
         }
 
-        // Episode Information Column
+        // Episode Information
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -1627,15 +1632,15 @@ fun SeasonDropdownTrigger(
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 20.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(currentSeasonName, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Text("▾", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+            Text(currentSeasonName, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text("▾", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
         }
     }
 }
@@ -1727,7 +1732,7 @@ fun SeasonDialogItem(
 // ======================= Sub-Components =======================
 
 @Composable
-fun NetflixPrimaryPlayButton(
+fun StreamPlayButton(
     text: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
@@ -1741,7 +1746,7 @@ fun NetflixPrimaryPlayButton(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focused = it.isFocused }
             .clip(shape)
-            .background(if (focused) Color.White else Color.White.copy(alpha = 0.9f))
+            .background(if (focused) Color.White else Color.White.copy(alpha = 0.92f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1761,7 +1766,7 @@ fun NetflixPrimaryPlayButton(
 }
 
 @Composable
-fun NetflixSecondaryButton(
+fun StreamSecondaryButton(
     text: String,
     icon: String,
     onClick: () -> Unit
@@ -2049,7 +2054,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.0", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.1", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

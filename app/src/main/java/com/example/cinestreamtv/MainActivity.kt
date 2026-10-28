@@ -149,10 +149,13 @@ enum class Tab(val label: String) {
 
 class Sizes(val posterH: Dp, val posterW: Dp, val cwH: Dp, val cwW: Dp)
 
+// Upgraded to much bigger Netflix-style sizing on 4K/16:9 displays
 fun sizesFor(maxH: Dp): Sizes {
-    val ph = maxH * 0.38f
-    val cwH = maxH * 0.28f
-    return Sizes(ph, ph * 0.67f, cwH, cwH * 1.77f)
+    val ph = maxH * 0.46f // Substantially larger portrait height
+    val pw = ph * 0.68f   // Perfect portrait proportion
+    val cwH = maxH * 0.34f // Larger landscape height for Continue Watching
+    val cwW = cwH * 1.77f  // 16:9 widescreen
+    return Sizes(ph, pw, cwH, cwW)
 }
 
 // ======================= Storage =======================
@@ -570,7 +573,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/1.6 (Linux; Android)")
+            .setUserAgent("FrameTV/1.7 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -977,8 +980,8 @@ fun HomeScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp),
-                verticalArrangement = Arrangement.spacedBy(32.dp)
+                contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
+                verticalArrangement = Arrangement.spacedBy(40.dp)
             ) {
                 if (recentList.isNotEmpty()) {
                     item(key = "continue_watching_shelf") {
@@ -1002,13 +1005,13 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
 
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.height(36.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
-            Text("Continue Watching", color = Color.White.copy(alpha = 0.95f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text("Continue Watching", color = Color.White.copy(alpha = 0.95f), fontSize = 24.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(24.dp)
+            horizontalArrangement = Arrangement.spacedBy(28.dp)
         ) {
             itemsIndexed(list, key = { _, titleItem -> "cw-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
@@ -1030,13 +1033,13 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxWidth()) {
         Box(Modifier.height(36.dp).padding(start = 64.dp), contentAlignment = Alignment.CenterStart) {
-            Text(row.title, color = Color.White.copy(alpha = 0.92f), fontSize = 22.sp, fontWeight = FontWeight.Bold)
+            Text(row.title, color = Color.White.copy(alpha = 0.92f), fontSize = 24.sp, fontWeight = FontWeight.Bold)
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(22.dp)
+            horizontalArrangement = Arrangement.spacedBy(26.dp)
         ) {
             itemsIndexed(row.list, key = { _, titleItem -> titleItem.key }) { i, t ->
                 NetflixExpandedCard(
@@ -1066,32 +1069,35 @@ fun NetflixExpandedCard(
     var showPreview by remember { mutableStateOf(false) }
     val ctx = LocalContext.current
 
+    // 1.2 second delay for Netflix-style video preview inside the expanded portrait card
     LaunchedEffect(focused) {
         if (focused) {
-            delay(1500)
+            delay(1200)
             showPreview = true
         } else {
             showPreview = false
         }
     }
 
+    // Cinematic Netflix focus scaling animation (1.22x expansion)
     val scaleAnim by animateFloatAsState(
-        targetValue = if (focused) 1.15f else 1f,
+        targetValue = if (focused) 1.22f else 1f,
         animationSpec = tween(220, easing = FastOutSlowInEasing),
         label = "cardScale"
     )
 
     val shape = RoundedCornerShape(16.dp)
-    val url = if (isWide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w342")
+    val url = if (isWide) img(t.backdrop ?: t.poster, "w780") else img(t.poster ?: t.backdrop, "w500")
     val ph = remember(t.id) { placeholder(t.id) }
 
+    // ExoPlayer initialized only when expanded preview triggers inside the card
     val exoPlayer = remember(showPreview, t.key) {
         if (showPreview) {
             ExoPlayer.Builder(ctx).build().apply {
                 val mediaItem = MediaItem.fromUri("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8")
                 setMediaItem(mediaItem)
                 repeatMode = Player.REPEAT_MODE_ALL
-                volume = 0f
+                volume = 0f // Muted background trailer preview
                 prepare()
                 playWhenReady = true
             }
@@ -1109,7 +1115,7 @@ fun NetflixExpandedCard(
             .width(width)
             .height(height)
             .scale(scaleAnim)
-            .shadow(if (focused) 24.dp else 4.dp, shape)
+            .shadow(if (focused) 32.dp else 4.dp, shape)
             .zIndex(if (focused) 10f else 1f)
             .onFocusChanged { focusState ->
                 focused = focusState.isFocused
@@ -1125,6 +1131,7 @@ fun NetflixExpandedCard(
             )
     ) {
         if (showPreview && exoPlayer != null) {
+            // Live video trailer playing inside the portrait card bounds
             AndroidView(
                 factory = { context ->
                     PlayerView(context).apply {
@@ -1138,31 +1145,32 @@ fun NetflixExpandedCard(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+            // Cinematic Gradient Overlay with Title, Year & Rating
             Box(
                 Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
                         )
                     )
-                    .padding(12.dp),
+                    .padding(14.dp),
                 contentAlignment = Alignment.BottomStart
             ) {
                 Column {
                     Text(
                         t.name,
                         color = Color.White,
-                        fontSize = 14.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         "${t.year}  ★ ${String.format(Locale.US, "%.1f", t.rating)}",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 11.sp
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 12.sp
                     )
                 }
             }
@@ -1173,8 +1181,8 @@ fun NetflixExpandedCard(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(10.dp)
-                        .height(4.dp)
+                        .padding(12.dp)
+                        .height(5.dp)
                         .clip(RoundedCornerShape(50))
                         .background(Color.Black.copy(alpha = 0.5f))
                 ) {
@@ -1640,7 +1648,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 1.6", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 1.7", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

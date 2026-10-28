@@ -37,6 +37,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -157,14 +158,9 @@ enum class Tab(val label: String) {
     Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
-class Sizes(val posterH: Dp, val posterW: Dp, val cwH: Dp, val cwW: Dp)
-
-fun sizesFor(maxH: Dp): Sizes {
-    val ph = maxH * 0.54f
-    val pw = ph * 0.85f
-    val cwH = maxH * 0.35f
-    return Sizes(ph, pw, cwH, cwH * 1.77f)
-}
+// Optimized fixed sizes for TV layouts to eliminate BoxWithConstraints measurement overhead
+class Sizes(val posterH: Dp = 260.dp, val posterW: Dp = 175.dp, val cwH: Dp = 190.dp, val cwW: Dp = 336.dp)
+val DefaultSizes = Sizes()
 
 // ======================= Storage =======================
 
@@ -247,8 +243,8 @@ object TorBoxScraper {
                 conn.requestMethod = "GET"
                 conn.setRequestProperty("Authorization", "Bearer $torboxKey")
                 conn.setRequestProperty("accept", "application/json")
-                conn.connectTimeout = 6000
-                conn.readTimeout = 6000
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
 
                 if (conn.responseCode == 200) {
                     val text = conn.inputStream.bufferedReader().use { it.readText() }
@@ -279,16 +275,15 @@ object Tmdb {
     private fun JSONObject.str(k: String): String? =
         if (isNull(k)) null else optString(k).ifEmpty { null }
 
-    private fun get(path: String, key: String, params: String = "", appendToResponse: String = ""): JSONObject? {
+    private fun get(path: String, key: String, params: String = ""): JSONObject? {
         return try {
             val bearer = key.startsWith("eyJ")
             val sb = StringBuilder(BASE).append(path).append("?language=en-US")
             if (params.isNotEmpty()) sb.append("&").append(params)
-            if (appendToResponse.isNotEmpty()) sb.append("&append_to_response=").append(appendToResponse)
             if (!bearer) sb.append("&api_key=").append(key)
             val c = URL(sb.toString()).openConnection() as HttpURLConnection
-            c.connectTimeout = 10000
-            c.readTimeout = 10000
+            c.connectTimeout = 8000
+            c.readTimeout = 8000
             c.setRequestProperty("accept", "application/json")
             if (bearer) c.setRequestProperty("Authorization", "Bearer $key")
             if (c.responseCode != 200) {
@@ -372,7 +367,7 @@ object Tmdb {
     }
 
     suspend fun details(t: Title, key: String): TitleExtra = withContext(Dispatchers.IO) {
-        val o = get("/${t.type}/${t.id}", key, appendToResponse = "credits,images") ?: return@withContext TitleExtra("", "", emptyList(), "", "", "", 0, null)
+        val o = get("/${t.type}/${t.id}", key, params = "append_to_response=credits,images") ?: return@withContext TitleExtra("", "", emptyList(), "", "", "", 0, null)
         
         val runtime = if (t.type == "tv") {
             val m = o.optJSONArray("episode_run_time")?.optInt(0, 0) ?: 0
@@ -472,19 +467,19 @@ fun vivid(argb: Int): Color {
 }
 
 fun averageColor(b: Bitmap): Color {
-    val s = Bitmap.createScaledBitmap(b, 16, 16, true)
+    val s = Bitmap.createScaledBitmap(b, 8, 8, true)
     var r = 0L
     var g = 0L
     var bl = 0L
-    for (x in 0 until 16) {
-        for (y in 0 until 16) {
+    for (x in 0 until 8) {
+        for (y in 0 until 8) {
             val p = s.getPixel(x, y)
             r += (p shr 16) and 0xFF
             g += (p shr 8) and 0xFF
             bl += p and 0xFF
         }
     }
-    val n = 256
+    val n = 64
     return vivid(android.graphics.Color.rgb((r / n).toInt(), (g / n).toInt(), (bl / n).toInt()))
 }
 
@@ -498,7 +493,7 @@ fun placeholder(id: Int): List<Color> {
 class Loaded(val bitmap: Bitmap, val color: Color)
 
 object Img {
-    private val cache = object : LruCache<String, Loaded>(64 * 1024 * 1024) {
+    private val cache = object : LruCache<String, Loaded>(48 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Loaded): Int = value.bitmap.byteCount
     }
 
@@ -508,8 +503,8 @@ object Img {
         return withContext(Dispatchers.IO) {
             try {
                 val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 8000
-                c.readTimeout = 8000
+                c.connectTimeout = 6000
+                c.readTimeout = 6000
                 val bmp = c.inputStream.use { BitmapFactory.decodeStream(it) }
                 if (bmp == null) {
                     null
@@ -532,7 +527,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
         if (url != null) loaded = Img.load(url)
     }
     val bmp = remember(loaded) { loaded?.bitmap?.asImageBitmap() }
-    val fade by animateFloatAsState(if (bmp != null) 1f else 0f, tween(300), label = "imgFade")
+    val fade by animateFloatAsState(if (bmp != null) 1f else 0f, tween(200), label = "imgFade")
     if (bmp != null) {
         Image(
             bitmap = bmp,
@@ -545,7 +540,7 @@ fun RemoteImage(url: String?, modifier: Modifier = Modifier) {
 
 // ======================= Smooth Scrolling =======================
 
-suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 250) {
+suspend fun LazyListState.centerItem(index: Int, durationMs: Int = 200) {
     val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
     if (item == null) {
         animateScrollToItem(index)
@@ -585,7 +580,7 @@ fun PillButton(
     onClick: () -> Unit = {}
 ) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(150), label = "pillScale")
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(120), label = "pillScale")
     val shape = RoundedCornerShape(50)
     
     val modifierLook = if (primary) {
@@ -637,7 +632,7 @@ fun AppleTvPlayerScreen(
 
     val exoPlayer = remember(streamUrl) {
         val dataSourceFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent("FrameTV/2.5 (Linux; Android)")
+            .setUserAgent("FrameTV/2.6 (Linux; Android)")
             .setAllowCrossProtocolRedirects(true)
 
         val uri = Uri.parse(streamUrl)
@@ -718,8 +713,8 @@ fun AppleTvPlayerScreen(
 
         AnimatedVisibility(
             visible = showControls,
-            enter = fadeIn(tween(200)),
-            exit = fadeOut(tween(200))
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150))
         ) {
             Box(
                 modifier = Modifier
@@ -983,7 +978,7 @@ fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
 @Composable
 fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (focused) 1.05f else 1f, tween(150), label = "tabScale")
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, tween(120), label = "tabScale")
     val shape = RoundedCornerShape(50)
     val bg = when {
         focused -> Color.White.copy(alpha = 0.95f)
@@ -1041,32 +1036,30 @@ fun HomeScreen(
     onOpen: (Title) -> Unit
 ) {
     val listState = rememberLazyListState()
+    val sz = remember { DefaultSizes }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val sz = sizesFor(maxHeight)
-        if (status != "ok") {
-            StatusMessage(status)
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-                verticalArrangement = Arrangement.spacedBy(48.dp)
-            ) {
-                if (recentList.isNotEmpty()) {
-                    item(key = "continue_watching_shelf") {
-                        ContinueWatchingRow(recentList, sz, onOpen)
-                    }
+    if (status != "ok") {
+        StatusMessage(status)
+    } else {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(40.dp)
+        ) {
+            if (recentList.isNotEmpty()) {
+                item(key = "continue_watching_shelf") {
+                    ContinueWatchingRow(recentList, sz, onOpen)
                 }
-                items(rows, key = { rowItem -> "row-${rowItem.title}" }) { row ->
-                    CatalogRow(row, sz, onOpen)
-                }
+            }
+            items(rows, key = { rowItem -> "row-${rowItem.title}" }) { row ->
+                CatalogRow(row, sz, onOpen)
             }
         }
     }
 }
 
-// ======================= Optimized Netflix-Style Expanding Focus Card Engine =======================
+// ======================= Highly Optimized Focus Card Engine =======================
 
 @Composable
 fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
@@ -1081,7 +1074,7 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(32.dp)
+            horizontalArrangement = Arrangement.spacedBy(28.dp)
         ) {
             itemsIndexed(list, key = { _, titleItem -> "cw-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
@@ -1089,7 +1082,7 @@ fun ContinueWatchingRow(list: List<Title>, sz: Sizes, onOpen: (Title) -> Unit) {
                     height = sz.cwH,
                     normalWidth = sz.cwW,
                     isWide = true,
-                    onFocused = { scope.launch { rowState.centerItem(i, 220) } },
+                    onFocused = { scope.launch { rowState.centerItem(i, 180) } },
                     onClick = { onOpen(t) }
                 )
             }
@@ -1109,7 +1102,7 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
         LazyRow(
             state = rowState,
             contentPadding = PaddingValues(horizontal = 64.dp),
-            horizontalArrangement = Arrangement.spacedBy(32.dp)
+            horizontalArrangement = Arrangement.spacedBy(28.dp)
         ) {
             itemsIndexed(row.list, key = { _, titleItem -> "title-${titleItem.key}" }) { i, t ->
                 NetflixExpandedCard(
@@ -1117,7 +1110,7 @@ fun CatalogRow(row: RowData, sz: Sizes, onOpen: (Title) -> Unit) {
                     height = sz.posterH,
                     normalWidth = sz.posterW,
                     isWide = false,
-                    onFocused = { scope.launch { rowState.centerItem(i, 220) } },
+                    onFocused = { scope.launch { rowState.centerItem(i, 180) } },
                     onClick = { onOpen(t) }
                 )
             }
@@ -1141,27 +1134,28 @@ fun NetflixExpandedCard(
 
     LaunchedEffect(focused) {
         if (focused) {
-            delay(1000)
+            delay(800)
             showPreview = true
         } else {
             showPreview = false
         }
     }
 
+    // Using lightweight scale modifier combined with fixed layout width to avoid heavy recomposition layout thrashing
     val landscapeW = height * 1.77f
-    val targetWidth = if (isWide) landscapeW * 1.08f else landscapeW
+    val targetWidth = if (isWide) landscapeW * 1.06f else landscapeW
     
     val animatedWidth by animateDpAsState(
         targetValue = if (focused) targetWidth else normalWidth,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
         label = "cardWidth"
     )
 
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(14.dp)
     val activeImageUrl = if (focused) {
-        img(t.backdrop ?: t.poster, "w780")
+        img(t.backdrop ?: t.poster, "w500")
     } else {
-        img(t.poster ?: t.backdrop, "w780")
+        img(t.poster ?: t.backdrop, "w500")
     }
 
     val ph = remember(t.id) { placeholder(t.id) }
@@ -1189,7 +1183,7 @@ fun NetflixExpandedCard(
         Modifier
             .width(animatedWidth)
             .height(height)
-            .shadow(if (focused) 24.dp else 4.dp, shape)
+            .shadow(if (focused) 18.dp else 2.dp, shape)
             .zIndex(if (focused) 10f else 1f)
             .onFocusChanged { focusState ->
                 focused = focusState.isFocused
@@ -1197,7 +1191,7 @@ fun NetflixExpandedCard(
             }
             .clip(shape)
             .background(Brush.linearGradient(ph))
-            .then(if (focused) Modifier.border(3.dp, Color.White, shape) else Modifier)
+            .then(if (focused) Modifier.border(2.5.dp, Color.White, shape) else Modifier)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1223,26 +1217,26 @@ fun NetflixExpandedCard(
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
-                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.88f))
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.85f))
                         )
                     )
-                    .padding(16.dp),
+                    .padding(14.dp),
                 contentAlignment = Alignment.BottomStart
             ) {
                 Column {
                     Text(
                         t.name,
                         color = Color.White,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         "${t.year}  ★ ${String.format(Locale.US, "%.1f", t.rating)}",
                         color = Color.White.copy(alpha = 0.75f),
-                        fontSize = 13.sp
+                        fontSize = 12.sp
                     )
                 }
             }
@@ -1253,8 +1247,8 @@ fun NetflixExpandedCard(
                     Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .padding(12.dp)
-                        .height(5.dp)
+                        .padding(10.dp)
+                        .height(4.dp)
                         .clip(RoundedCornerShape(50))
                         .background(Color.Black.copy(alpha = 0.5f))
                 ) {
@@ -1854,7 +1848,7 @@ fun SearchScreen(
             searching = false
         } else {
             searching = true
-            delay(400)
+            delay(300)
             results = Tmdb.search(query.trim(), tmdbKey)
             searching = false
         }
@@ -1864,47 +1858,45 @@ fun SearchScreen(
     val showing = if (isQuery) results else fallback
     val label = if (isQuery) "Results" else "Trending"
     val rowData = remember(showing, label) { RowData(label, showing) }
+    val sz = remember { DefaultSizes }
 
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val sz = sizesFor(maxHeight)
-        Column(Modifier.fillMaxSize().padding(top = 16.dp)) {
-            Box(
-                Modifier
-                    .padding(horizontal = 64.dp)
+    Column(Modifier.fillMaxSize().padding(top = 16.dp)) {
+        Box(
+            Modifier
+                .padding(horizontal = 64.dp)
+                .fillMaxWidth()
+                .appleGlass(RoundedCornerShape(24.dp), focused)
+                .padding(horizontal = 24.dp, vertical = 18.dp)
+        ) {
+            if (query.isEmpty()) {
+                Text("Search movies and shows", color = Color.White.copy(alpha = 0.45f), fontSize = 20.sp)
+            }
+            BasicTextField(
+                value = query,
+                onValueChange = { newQuery -> query = newQuery },
+                singleLine = true,
+                textStyle = TextStyle(color = Color.White, fontSize = 20.sp),
+                cursorBrush = SolidColor(Color.White),
+                modifier = Modifier
                     .fillMaxWidth()
-                    .appleGlass(RoundedCornerShape(24.dp), focused)
-                    .padding(horizontal = 24.dp, vertical = 18.dp)
-            ) {
-                if (query.isEmpty()) {
-                    Text("Search movies and shows", color = Color.White.copy(alpha = 0.45f), fontSize = 20.sp)
-                }
-                BasicTextField(
-                    value = query,
-                    onValueChange = { newQuery -> query = newQuery },
-                    singleLine = true,
-                    textStyle = TextStyle(color = Color.White, fontSize = 20.sp),
-                    cursorBrush = SolidColor(Color.White),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onFocusChanged { focusState -> focused = focusState.isFocused }
-                )
-            }
-            Spacer(Modifier.height(16.dp))
-            when {
-                tmdbKey.isBlank() -> Text(
-                    "Add your TMDB key in Settings to search.",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 17.sp,
-                    modifier = Modifier.padding(start = 64.dp, top = 20.dp)
-                )
-                isQuery && showing.isEmpty() -> Text(
-                    if (searching) "Searching…" else "No results",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 17.sp,
-                    modifier = Modifier.padding(start = 64.dp, top = 20.dp)
-                )
-                else -> CatalogRow(rowData, sz, onOpen)
-            }
+                    .onFocusChanged { focusState -> focused = focusState.isFocused }
+            )
+        }
+        Spacer(Modifier.height(16.dp))
+        when {
+            tmdbKey.isBlank() -> Text(
+                "Add your TMDB key in Settings to search.",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 17.sp,
+                modifier = Modifier.padding(start = 64.dp, top = 20.dp)
+            )
+            isQuery && showing.isEmpty() -> Text(
+                if (searching) "Searching…" else "No results",
+                color = Color.White.copy(alpha = 0.6f),
+                fontSize = 17.sp,
+                modifier = Modifier.padding(start = 64.dp, top = 20.dp)
+            )
+            else -> CatalogRow(rowData, sz, onOpen)
         }
     }
 }
@@ -1916,32 +1908,30 @@ fun LibraryScreen(
     saved: List<Title>,
     onOpen: (Title) -> Unit
 ) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        val sz = sizesFor(maxHeight)
-        if (saved.isEmpty()) {
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .padding(start = 64.dp, end = 64.dp, top = 40.dp),
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text("Your List is Empty", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Add movies and TV shows to your list to find them here easily.",
-                    color = Color.White.copy(alpha = 0.65f),
-                    fontSize = 17.sp
-                )
-            }
-        } else {
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(top = 24.dp, bottom = 80.dp),
-                verticalArrangement = Arrangement.spacedBy(28.dp)
-            ) {
-                item(key = "saved_list") {
-                    CatalogRow(RowData("My List", saved), sz, onOpen)
-                }
+    val sz = remember { DefaultSizes }
+    if (saved.isEmpty()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(start = 64.dp, end = 64.dp, top = 40.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text("Your List is Empty", color = Color.White, fontSize = 36.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "Add movies and TV shows to your list to find them here easily.",
+                color = Color.White.copy(alpha = 0.65f),
+                fontSize = 17.sp
+            )
+        }
+    } else {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 24.dp, bottom = 80.dp),
+            verticalArrangement = Arrangement.spacedBy(28.dp)
+        ) {
+            item(key = "saved_list") {
+                CatalogRow(RowData("My List", saved), sz, onOpen)
             }
         }
     }
@@ -2078,7 +2068,7 @@ fun AboutPanel() {
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Text("Frame TV", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-        Text("Version 2.5", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
+        Text("Version 2.6", color = Color.White.copy(alpha = 0.65f), fontSize = 17.sp)
         Spacer(Modifier.height(8.dp))
         Text(
             "Metadata and artwork provided by TMDB.",

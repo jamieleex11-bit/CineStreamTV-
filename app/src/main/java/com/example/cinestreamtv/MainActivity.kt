@@ -1275,8 +1275,8 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
                 .fillMaxSize()
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF141414).opacity(0.95f),
-                        0.5f to Color(0xFF141414).opacity(0.5f),
+                        0f to Color(0xFF141414).copy(alpha = 0.95f),
+                        0.5f to Color(0xFF141414).copy(alpha = 0.5f),
                         1f to Color.Transparent
                     )
                 )
@@ -1288,7 +1288,7 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.7f to Color(0xFF141414).opacity(0.4f),
+                        0.7f to Color(0xFF141414).copy(alpha = 0.4f),
                         1f to Color(0xFF141414)
                     )
                 )
@@ -1483,7 +1483,7 @@ fun NetflixCard(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.opacity(0.8f))))
+                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.8f))))
                     .padding(10.dp),
                 contentAlignment = Alignment.BottomStart
             ) {
@@ -1573,8 +1573,8 @@ fun DetailScreen(
                 .fillMaxWidth(0.65f)
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF141414).opacity(0.95f),
-                        0.7f to Color(0xFF141414).opacity(0.6f),
+                        0f to Color(0xFF141414).copy(alpha = 0.95f),
+                        0.7f to Color(0xFF141414).copy(alpha = 0.6f),
                         1f to Color.Transparent
                     )
                 )
@@ -1586,7 +1586,7 @@ fun DetailScreen(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.65f to Color(0xFF141414).opacity(0.3f),
+                        0.65f to Color(0xFF141414).copy(alpha = 0.3f),
                         1f to Color(0xFF141414)
                     )
                 )
@@ -1757,7 +1757,7 @@ fun VerticalEpisodeRow(e: Episode, progress: Float, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth(0.92f)
             .clip(RoundedCornerShape(10.dp))
-            .background(if (focused) Color.White.copy(alpha = 0.15f) -> Color.Transparent)
+            .background(if (focused) Color.White.copy(alpha = 0.15f) else Color.Transparent)
             .then(if (focused) Modifier.border(2.dp, Color.White, RoundedCornerShape(10.dp)) else Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clickable(

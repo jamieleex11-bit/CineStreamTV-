@@ -1,8 +1,9 @@
-package com.example.cinestreamtv
 # ==============================================================================
-# FlixGlass TV - Android TV Debrid Player (Kivy + TorBox)
-# File: main.py
-# Description: Netflix Liquid Glass UI tailored for Android TV D-Pad Remote Navigation.
+# Repository: cinestream
+# Package Domain: org.cinestream.app
+# App Class: CineStreamApp
+# UI Title: Frame TV
+# Description: Debrid Player with TorBox Integration for Android TV.
 # ==============================================================================
 
 import os
@@ -18,7 +19,7 @@ from kivy.uix.image import AsyncImage
 from kivy.properties import StringProperty, ListProperty, ObjectProperty
 from kivy.core.window import Window
 
-# Set TV 1080p Standard Orientation
+# Standard Android TV 1080p Resolution
 Window.size = (1920, 1080)
 
 KV_MARKUP = '''
@@ -54,7 +55,7 @@ ScreenManager:
                 pos: self.pos
                 size: self.size
 
-        # --- LIQUID GLASS TOP NAVBAR ---
+        # --- TOP LIQUID GLASS NAVBAR ---
         BoxLayout:
             size_hint_y: 0.1
             padding: [30, 10]
@@ -67,7 +68,7 @@ ScreenManager:
                     size: self.size
 
             Label:
-                text: '[b]FLIX[/b][color=e50914]GLASS[/color]'
+                text: '[b]FRAME[/b] [color=e50914]TV[/color]'
                 markup: True
                 font_size: '24sp'
                 size_hint_x: 0.2
@@ -120,19 +121,19 @@ ScreenManager:
                         halign: 'left'
                         text_size: self.size
                     Label:
-                        text: 'Instant 4K TorBox Debrid Stream Available'
+                        text: 'TorBox Debrid Direct CDN Connected'
                         font_size: '14sp'
                         color: (0.1, 0.9, 0.5, 1)
                         halign: 'left'
                         text_size: self.size
                     GlassButton:
-                        text: 'Play Debrid Stream'
+                        text: 'Stream Now'
                         size_hint: (0.4, 0.3)
                         on_release: root.manager.current = 'player'
 
             # Carousels Grid
             Label:
-                text: 'Trending Debrid Downloads'
+                text: 'Trending Debrid Streams'
                 font_size: '18sp'
                 bold: True
                 size_hint_y: 0.08
@@ -155,7 +156,7 @@ ScreenManager:
         padding: 50
         spacing: 20
         Label:
-            text: 'TorBox Debrid Configuration'
+            text: 'Frame TV - TorBox Configuration'
             font_size: '24sp'
             bold: True
             size_hint_y: 0.1
@@ -171,7 +172,7 @@ ScreenManager:
     BoxLayout:
         orientation: 'vertical'
         Label:
-            text: '[ Video Player Overlay Placeholder ]'
+            text: '[ Frame TV Video Overlay ]'
             font_size: '20sp'
         GlassButton:
             text: 'Back to Home'
@@ -182,7 +183,6 @@ ScreenManager:
 
 class HomeScreen(Screen):
     def on_enter(self):
-        # Dynamically add poster items
         grid = self.ids.poster_grid
         grid.clear_widgets()
         posters = [
@@ -201,10 +201,12 @@ class SettingsScreen(Screen):
 class PlayerScreen(Screen):
     pass
 
-class FlixGlassApp(App):
+# Internal App Class set to CineStreamApp for repository & build spec consistency
+class CineStreamApp(App):
     def build(self):
-        self.title = "FlixGlass Debrid TV Player"
+        # Display Title explicitly set to Frame TV for Android OS launcher & TV window header
+        self.title = "Frame TV"
         return Builder.load_string(KV_MARKUP)
 
 if __name__ == '__main__':
-    FlixGlassApp().run()
+    CineStreamApp().run()

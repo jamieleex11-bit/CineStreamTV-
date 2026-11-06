@@ -1,5 +1,3 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
-
 package com.example.cinestreamtv
 
 import android.app.Activity
@@ -703,6 +701,7 @@ fun GlassButton(
 
 // ======================= Universal Player with Automatic Debrid Resolution =======================
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun CinematicPlayerScreen(
     title: String,
@@ -1386,6 +1385,7 @@ fun ShelfRow(
 
 // ======================= Netflix Card with Trailer Preview =======================
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun NetflixCard(
     t: Title,

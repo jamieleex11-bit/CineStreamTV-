@@ -1,4 +1,4 @@
-Package com.example.cinestreamtv
+package com.example.cinestreamtv
 
 import android.app.Activity
 import android.content.Context
@@ -1990,25 +1990,24 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
 
 @Composable
 fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit) {
-    var query by remember { mutableStateOf(false) }
-    var searchQuery by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<Title>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
 
-    LaunchedEffect(searchQuery, tmdbKey) {
-        if (searchQuery.trim().length < 2 || tmdbKey.isBlank()) {
+    LaunchedEffect(query, tmdbKey) {
+        if (query.trim().length < 2 || tmdbKey.isBlank()) {
             results = emptyList()
             searching = false
         } else {
             searching = true
             delay(250)
-            results = Tmdb.search(searchQuery.trim(), tmdbKey)
+            results = Tmdb.search(query.trim(), tmdbKey)
             searching = false
         }
     }
 
-    val isQuery = searchQuery.trim().length >= 2
+    val isQuery = query.trim().length >= 2
     val showing = if (isQuery) results else fallback
     val label = if (isQuery) "Results" else "Trending"
     val sz = remember { DefaultSizes }
@@ -2021,12 +2020,12 @@ fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit
                 .appleGlass(RoundedCornerShape(22.dp), focused)
                 .padding(horizontal = 22.dp, vertical = 16.dp)
         ) {
-            if (searchQuery.isEmpty()) {
+            if (query.isEmpty()) {
                 Text("Search movies and shows", color = Color.White.copy(alpha = 0.45f), fontSize = 18.sp)
             }
             BasicTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
+                value = query,
+                onValueChange = { query = it },
                 singleLine = true,
                 textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
                 cursorBrush = SolidColor(Color.White),
@@ -2155,7 +2154,7 @@ fun ServicesPanel(store: Store, onSaved: () -> Unit) {
         item { Text("Services", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
         item { Text("Configure your TMDB and TorBox debrid API keys below.", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp) }
         item { SecretField("TMDB API key", tmdb) { tmdb = it; saved = false } }
-        item { SecretField("TorBox API key", torbox) { torbox = it; saved = false } }
+        item { SecretField("TorBox API key", torbox) { torbox = it; saved = false } --}
         item { SecretField("Real-Debrid API key", rd) { rd = it; saved = false } }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -2242,4 +2241,4 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 }
 
-fn maskKey(v: String): String = if (v.length <= 8) "••••••••" else v.take(4) + "••••••••" + v.takeLast(4)
+fun maskKey(v: String): String = if (v.length <= 8) "••••••••" else v.take(4) + "••••••••" + v.takeLast(4)

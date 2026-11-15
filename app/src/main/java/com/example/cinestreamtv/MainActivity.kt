@@ -61,6 +61,7 @@ import androidx.compose.ui.zIndex
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.hls.HlsMediaSource
@@ -742,7 +743,7 @@ fun GlassButton(
 
 // ======================= Universal Player with Automatic Debrid Resolution =======================
 
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@OptIn(UnstableApi::class)
 @Composable
 fun CinematicPlayerScreen(
     title: String,
@@ -1502,7 +1503,7 @@ fun ShelfRow(
 
 // ======================= Netflix Card with Trailer Preview =======================
 
-@OptIn(androidx.media3.common.util.UnstableApi::class)
+@OptIn(UnstableApi::class)
 @Composable
 fun NetflixCard(
     t: Title,

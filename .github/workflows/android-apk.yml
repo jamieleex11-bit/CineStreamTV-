@@ -1,3 +1,4 @@
+
 name: Build Android TV APK
 
 on:
@@ -11,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -35,7 +37,10 @@ jobs:
           "$SDKM" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          gradle --no-daemon assembleDebug -PTMDB_API_KEY="$TMDB_API_KEY"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

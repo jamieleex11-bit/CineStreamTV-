@@ -1376,7 +1376,7 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
             .padding(horizontal = 64.dp)
             .clip(shape)
             .onFocusChanged { focused = it.isFocused }
-            .border(width = if (focused) 2.5.dp else 0.dp, color = if (focused) Color.White else Color.Transparent, shape = shape)
+            .border(width = if (focused) 2.dp else 0.dp, color = if (focused) Color.White else Color.Transparent, shape = shape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -2154,7 +2154,7 @@ fun ServicesPanel(store: Store, onSaved: () -> Unit) {
         item { Text("Services", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
         item { Text("Configure your TMDB and TorBox debrid API keys below.", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp) }
         item { SecretField("TMDB API key", tmdb) { tmdb = it; saved = false } }
-        item { SecretField("TorBox API key", torbox) { torbox = it; saved = false } --}
+        item { SecretField("TorBox API key", torbox) { torbox = it; saved = false } }
         item { SecretField("Real-Debrid API key", rd) { rd = it; saved = false } }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {

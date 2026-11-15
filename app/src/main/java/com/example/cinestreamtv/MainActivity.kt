@@ -1502,7 +1502,7 @@ fun ShelfRow(
 
 // ======================= Netflix Card with Trailer Preview =======================
 
-@androidx.media3.common.util.UnstableApi
+@OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun NetflixCard(
     t: Title,

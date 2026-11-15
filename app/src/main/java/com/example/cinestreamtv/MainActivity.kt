@@ -1,4 +1,7 @@
-@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+@file:OptIn(
+    androidx.media3.common.util.UnstableApi::class,
+    androidx.compose.ui.ExperimentalComposeUiApi::class
+)
 
 package com.example.cinestreamtv
 

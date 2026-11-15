@@ -461,7 +461,7 @@ object Tmdb {
         }
 
         val genres = o.optJSONArray("genres")?.let { g ->
-            (0 until g.length()).joinToString(" Â· ") { g.getJSONObject(it).optString("name") }
+            (0 until g.length()).joinToString(" ÃÂ· ") { g.getJSONObject(it).optString("name") }
         } ?: ""
 
         val seasons = o.optJSONArray("seasons")?.let { s ->
@@ -924,7 +924,7 @@ fun CinematicPlayerScreen(
                 ) {
                     if (resolutionState == "searching") {
                         Text("Resolving cached debrid stream...", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("Checking Comet & TorBox for instant playbackâ¦", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+                        Text("Checking Comet & TorBox for instant playbackÃ¢ÂÂ¦", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
                     } else {
                         Text("Playback Failed / No Cached Source", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("Could not resolve a playable cached video stream for this title.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
@@ -983,7 +983,7 @@ fun CinematicPlayerScreen(
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GlassButton("Â« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
+                    GlassButton("ÃÂ« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
                         val pos = exoPlayer.currentPosition
                         val target = (pos - 10000L).coerceAtLeast(0L)
                         exoPlayer.seekTo(target)
@@ -991,14 +991,14 @@ fun CinematicPlayerScreen(
                     }
 
                     GlassButton(
-                        if (isPlaying) "ââ Pause" else "â¶ Play",
+                        if (isPlaying) "Ã¢ÂÂÃ¢ÂÂ Pause" else "Ã¢ÂÂ¶ Play",
                         primary = true,
                         modifier = Modifier.focusRequester(playPauseFocus)
                     ) {
                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                     }
 
-                    GlassButton("10s Â»", modifier = Modifier.focusRequester(forwardFocus)) {
+                    GlassButton("10s ÃÂ»", modifier = Modifier.focusRequester(forwardFocus)) {
                         val pos = exoPlayer.currentPosition
                         val dur = exoPlayer.duration.coerceAtLeast(0L)
                         val maxDur = if (dur > 0L) dur else pos + 10000L
@@ -1056,9 +1056,10 @@ fun CinestreamApp() {
     val store = remember { Store(ctx) }
 
     var tab by remember { mutableStateOf(Tab.Home) }
-    var tmdbKey by remember { mutableStateOf(store.get("tmdb")) }
+    // TMDB key is injected at build time from the GitHub Actions secret.
+    val tmdbKey = BuildConfig.TMDB_API_KEY.trim()
     var torboxKey by remember { mutableStateOf(store.get("torbox")) }
-    var status by remember { mutableStateOf(if (store.get("tmdb").isBlank()) "needkey" else "loading") }
+    var status by remember { mutableStateOf(if (tmdbKey.isBlank()) "needkey" else "loading") }
     var rows by remember { mutableStateOf<List<RowData>>(emptyList()) }
     var movieRows by remember { mutableStateOf<List<RowData>>(emptyList()) }
     var tvRows by remember { mutableStateOf<List<RowData>>(emptyList()) }
@@ -1157,7 +1158,6 @@ fun CinestreamApp() {
                         Tab.Search -> SearchScreen(tmdbKey, rows.firstOrNull()?.list ?: emptyList(), onOpen)
                         Tab.Library -> LibraryScreen(saved, onOpen)
                         Tab.Settings -> SettingsScreen(store) {
-                            tmdbKey = store.get("tmdb")
                             torboxKey = store.get("torbox")
                         }
                     }
@@ -1243,9 +1243,9 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
 @Composable
 fun StatusMessage(status: String) {
     val msg = when (status) {
-        "needkey" -> Pair("Add your TMDB key", "Open Settings and paste your TMDB API key to load movies and shows.")
-        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendationsâ¦")
-        else -> Pair("Couldn't load titles", "Check your TMDB key and internet connection in Settings.")
+        "needkey" -> Pair("TMDB isn't configured", "This build has no TMDB key. Check the TMDB_API_KEY GitHub secret and rebuild.")
+        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendationsÃ¢ÂÂ¦")
+        else -> Pair("Couldn't load titles", "Check the TMDB_API_KEY GitHub secret and your internet connection, then rebuild.")
     }
     Column(
         Modifier
@@ -1435,11 +1435,11 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
             ) {
                 if (t.year.isNotEmpty()) {
                     Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                    Text("Ã¢ÂÂ¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                 }
                 if (t.rating > 0.0) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("â", color = Color(0xFFFFC107), fontSize = 14.sp)
+                        Text("Ã¢ÂÂ", color = Color(0xFFFFC107), fontSize = 14.sp)
                         Text(String.format(Locale.US, "%.1f", t.rating), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -1456,7 +1456,7 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
 
             Spacer(Modifier.height(4.dp))
 
-            GlassButton("â¶ Play", primary = true, modifier = Modifier.focusRequester(playFocus)) {
+            GlassButton("Ã¢ÂÂ¶ Play", primary = true, modifier = Modifier.focusRequester(playFocus)) {
                 onOpen(t)
             }
         }
@@ -1608,7 +1608,7 @@ fun NetflixCard(
                 Column {
                     Text(t.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(2.dp))
-                    Text("${t.year}  â ${String.format(Locale.US, "%.1f", t.rating)}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
+                    Text("${t.year}  Ã¢ÂÂ ${String.format(Locale.US, "%.1f", t.rating)}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
                 }
             }
         } else {
@@ -1721,7 +1721,7 @@ fun DetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("${t.name} â Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Text("${t.name} Ã¢ÂÂ Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                     if ((extra?.seasons?.size ?: 0) > 0) {
                         NetflixSeasonDropdownTrigger(currentSeasonName) { showSeasonPicker = true }
                     }
@@ -1778,17 +1778,17 @@ fun DetailScreen(
                 ) {
                     if (t.year.isNotEmpty()) {
                         Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                        Text("Ã¢ÂÂ¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                     }
                     Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     if (extra?.runtime?.isNotEmpty() == true) {
-                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                        Text("Ã¢ÂÂ¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                         Text(extra!!.runtime, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                     if (t.rating > 0.0) {
-                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                        Text("Ã¢ÂÂ¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("â", color = Color(0xFFFFC107), fontSize = 14.sp)
+                            Text("Ã¢ÂÂ", color = Color(0xFFFFC107), fontSize = 14.sp)
                             Text(String.format(Locale.US, "%.1f", t.rating), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -1813,17 +1813,17 @@ fun DetailScreen(
                 Spacer(Modifier.height(20.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NetflixActionButton(playButtonText, "â¶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
+                    NetflixActionButton(playButtonText, "Ã¢ÂÂ¶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
                         onPlay(extra)
                     }
                     if (isShow) {
-                        NetflixActionButton("Episodes", "â°", primary = false) { showEpisodeBrowser = true }
+                        NetflixActionButton("Episodes", "Ã¢ÂÂ°", primary = false) { showEpisodeBrowser = true }
                     }
-                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "â" else "+", primary = false) {
+                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "Ã¢ÂÂ" else "+", primary = false) {
                         onToggleSaved()
                     }
                     if (isInContinueWatching) {
-                        NetflixActionButton("Remove from Continue Watching", "â", primary = false) {
+                        NetflixActionButton("Remove from Continue Watching", "Ã¢ÂÂ", primary = false) {
                             onRemoveRecent()
                         }
                     }
@@ -1942,7 +1942,7 @@ fun NetflixSeasonDropdownTrigger(currentSeasonName: String, onClick: () -> Unit)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(currentSeasonName, color = if (focused) Color.Black else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text("â¾", color = if (focused) Color.Black else Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("Ã¢ÂÂ¾", color = if (focused) Color.Black else Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
     }
 }
@@ -1979,7 +1979,7 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
                         ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text(s.name, color = if (focused) Color.Black else if (s.number == currentSeason) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                if (s.number == currentSeason) Text("â", color = if (focused) Color.Black else Color.White, fontSize = 14.sp)
+                                if (s.number == currentSeason) Text("Ã¢ÂÂ", color = if (focused) Color.Black else Color.White, fontSize = 14.sp)
                             }
                         }
                     }
@@ -2039,8 +2039,8 @@ fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit
         }
         Spacer(Modifier.height(16.dp))
         when {
-            tmdbKey.isBlank() -> Text("Add your TMDB key in Settings to search.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
-            isQuery && showing.isEmpty() -> Text(if (searching) "Searchingâ¦" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
+            tmdbKey.isBlank() -> Text("TMDB is not configured in this build.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
+            isQuery && showing.isEmpty() -> Text(if (searching) "SearchingÃ¢ÂÂ¦" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
             else -> ShelfRow(label, showing, sz, tmdbKey, onOpen, isWide = false)
         }
     }
@@ -2144,7 +2144,6 @@ fun SettingsTab(label: String, selected: Boolean, onSelect: () -> Unit) {
 
 @Composable
 fun ServicesPanel(store: Store, onSaved: () -> Unit) {
-    var tmdb by remember { mutableStateOf(store.get("tmdb")) }
     var torbox by remember { mutableStateOf(store.get("torbox")) }
     var rd by remember { mutableStateOf(store.get("realdebrid")) }
     var saved by remember { mutableStateOf(false) }
@@ -2155,14 +2154,12 @@ fun ServicesPanel(store: Store, onSaved: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
         item { Text("Services", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold) }
-        item { Text("Configure your TMDB and TorBox debrid API keys below.", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp) }
-        item { SecretField("TMDB API key", tmdb) { tmdb = it; saved = false } }
+        item { Text("TMDB metadata is built into this app. Add your debrid service keys below.", color = Color.White.copy(alpha = 0.65f), fontSize = 15.sp) }
         item { SecretField("TorBox API key", torbox) { torbox = it; saved = false } }
         item { SecretField("Real-Debrid API key", rd) { rd = it; saved = false } }
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 GlassButton("Save", primary = true) {
-                    store.put("tmdb", tmdb.trim())
                     store.put("torbox", torbox.trim())
                     store.put("realdebrid", rd.trim())
                     saved = true
@@ -2244,4 +2241,4 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 }
 
-fun maskKey(v: String): String = if (v.length <= 8) "â¢â¢â¢â¢â¢â¢â¢â¢" else v.take(4) + "â¢â¢â¢â¢â¢â¢â¢â¢" + v.takeLast(4)
+fun maskKey(v: String): String = if (v.length <= 8) "Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" else v.take(4) + "Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" + v.takeLast(4)

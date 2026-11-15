@@ -1,4 +1,4 @@
-package com.example.cinestreamtv
+Package com.example.cinestreamtv
 
 import android.app.Activity
 import android.content.Context
@@ -161,7 +161,7 @@ class TitleExtra(
 )
 
 enum class Tab(val label: String) {
-    Home("Home"), Search("Search"), Library("Library"), Settings("Settings")
+    Home("Home"), Movies("Movies"), TVShows("TV Shows"), Search("Search"), Library("Library"), Settings("Settings")
 }
 
 class Sizes(val posterH: Dp = 250.dp, val posterW: Dp = 170.dp, val cwH: Dp = 185.dp, val cwW: Dp = 328.dp)
@@ -393,6 +393,47 @@ object Tmdb {
             async {
                 val queryParams = params[d.title] ?: ""
                 RowData(d.title, list(if (queryParams.isNotEmpty()) "${d.path}?$queryParams" else d.path, key, d.type))
+            }
+        }.awaitAll().filter { it.list.isNotEmpty() }
+    }
+
+    suspend fun loadMovieRows(key: String): List<RowData> = coroutineScope {
+        val defs = listOf(
+            RowDef("Trending Movies", "/trending/movie/week", "movie"),
+            RowDef("Action Movies", "/discover/movie", "movie"),
+            RowDef("Top Rated Movies", "/movie/top_rated", "movie"),
+            RowDef("Comedy Movies", "/discover/movie", "movie"),
+            RowDef("Sci-Fi Movies", "/discover/movie", "movie")
+        )
+        val params = mapOf(
+            "Action Movies" to "with_genres=28",
+            "Comedy Movies" to "with_genres=35",
+            "Sci-Fi Movies" to "with_genres=878"
+        )
+        defs.map { d ->
+            async {
+                val qp = params[d.title] ?: ""
+                RowData(d.title, list(if (qp.isNotEmpty()) "${d.path}?$qp" else d.path, key, d.type))
+            }
+        }.awaitAll().filter { it.list.isNotEmpty() }
+    }
+
+    suspend fun loadTvRows(key: String): List<RowData> = coroutineScope {
+        val defs = listOf(
+            RowDef("Trending TV Shows", "/trending/tv/week", "tv"),
+            RowDef("Popular TV Shows", "/tv/popular", "tv"),
+            RowDef("Top Rated Shows", "/tv/top_rated", "tv"),
+            RowDef("Sci-Fi & Fantasy TV", "/discover/tv", "tv"),
+            RowDef("Animation Series", "/discover/tv", "tv")
+        )
+        val params = mapOf(
+            "Sci-Fi & Fantasy TV" to "with_genres=10765",
+            "Animation Series" to "with_genres=16"
+        )
+        defs.map { d ->
+            async {
+                val qp = params[d.title] ?: ""
+                RowData(d.title, list(if (qp.isNotEmpty()) "${d.path}?$qp" else d.path, key, d.type))
             }
         }.awaitAll().filter { it.list.isNotEmpty() }
     }
@@ -1015,6 +1056,8 @@ fun CinestreamApp() {
     var torboxKey by remember { mutableStateOf(store.get("torbox")) }
     var status by remember { mutableStateOf(if (store.get("tmdb").isBlank()) "needkey" else "loading") }
     var rows by remember { mutableStateOf<List<RowData>>(emptyList()) }
+    var movieRows by remember { mutableStateOf<List<RowData>>(emptyList()) }
+    var tvRows by remember { mutableStateOf<List<RowData>>(emptyList()) }
     var recent by remember { mutableStateOf(store.recent()) }
     var saved by remember { mutableStateOf(store.saved()) }
     var detail by remember { mutableStateOf<Title?>(null) }
@@ -1048,10 +1091,14 @@ fun CinestreamApp() {
         } else {
             status = "loading"
             val loaded = Tmdb.loadRows(tmdbKey)
+            val loadedMovies = Tmdb.loadMovieRows(tmdbKey)
+            val loadedTv = Tmdb.loadTvRows(tmdbKey)
             if (loaded.isEmpty()) {
                 status = "error"
             } else {
                 rows = loaded
+                movieRows = loadedMovies
+                tvRows = loadedTv
                 status = "ok"
             }
         }
@@ -1101,6 +1148,8 @@ fun CinestreamApp() {
                 Box(Modifier.weight(1f)) {
                     when (tab) {
                         Tab.Home -> HomeScreen(recentList = recent, rows = rows, status = status, tmdbKey = tmdbKey, onOpen = onOpen)
+                        Tab.Movies -> MoviesScreen(rows = movieRows, status = status, tmdbKey = tmdbKey, onOpen = onOpen)
+                        Tab.TVShows -> TvShowsScreen(rows = tvRows, status = status, tmdbKey = tmdbKey, onOpen = onOpen)
                         Tab.Search -> SearchScreen(tmdbKey, rows.firstOrNull()?.list ?: emptyList(), onOpen)
                         Tab.Library -> LibraryScreen(saved, onOpen)
                         Tab.Settings -> SettingsScreen(store) {
@@ -1123,7 +1172,7 @@ fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
     Box(
         Modifier
             .fillMaxWidth()
-            .padding(top = 22.dp, start = 64.dp, end = 64.dp, bottom = 10.dp)
+            .padding(top = 16.dp, start = 64.dp, end = 64.dp, bottom = 8.dp)
     ) {
         Row(
             Modifier.align(Alignment.CenterStart),
@@ -1131,22 +1180,22 @@ fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
         ) {
             Box(
                 Modifier
-                    .size(42.dp)
-                    .appleGlass(RoundedCornerShape(12.dp), true),
+                    .size(34.dp)
+                    .appleGlass(RoundedCornerShape(10.dp), true),
                 contentAlignment = Alignment.Center
             ) {
-                Text("C", color = Color(0xFFE50914), fontSize = 24.sp, fontWeight = FontWeight.Black)
+                Text("C", color = Color(0xFFE50914), fontSize = 19.sp, fontWeight = FontWeight.Black)
             }
-            Spacer(Modifier.width(14.dp))
-            Text("CineStream", color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(10.dp))
+            Text("CineStream", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
 
         Row(
             Modifier
                 .align(Alignment.Center)
                 .appleGlass(RoundedCornerShape(50), false)
-                .padding(4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             Tab.values().forEach { tabItem ->
                 NavTab(tabItem.label, tabItem == current) { onSelect(tabItem) }
@@ -1178,9 +1227,9 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
         Text(
             label,
             color = if (focused) Color(0xFF0F111A) else Color.White.copy(alpha = if (selected) 1f else 0.7f),
-            fontSize = 15.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(horizontal = 22.dp, vertical = 9.dp)
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)
         )
     }
 }
@@ -1238,6 +1287,74 @@ fun HomeScreen(
                 }
             }
             items(rows, key = { rowItem -> "row-${rowItem.title}" }) { row ->
+                ShelfRow(row.title, row.list, sz, tmdbKey, onOpen, isWide = false)
+            }
+        }
+    }
+}
+
+// ======================= Movies Screen =======================
+
+@Composable
+fun MoviesScreen(
+    rows: List<RowData>,
+    status: String,
+    tmdbKey: String,
+    onOpen: (Title) -> Unit
+) {
+    val listState = rememberLazyListState()
+    val sz = remember { DefaultSizes }
+    val heroTitle = rows.firstOrNull()?.list?.firstOrNull()
+
+    if (status != "ok") {
+        StatusMessage(status)
+    } else {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(32.dp)
+        ) {
+            if (heroTitle != null) {
+                item(key = "movies_hero_banner") {
+                    HeroBanner(heroTitle, onOpen)
+                }
+            }
+            items(rows, key = { rowItem -> "movie-row-${rowItem.title}" }) { row ->
+                ShelfRow(row.title, row.list, sz, tmdbKey, onOpen, isWide = false)
+            }
+        }
+    }
+}
+
+// ======================= TV Shows Screen =======================
+
+@Composable
+fun TvShowsScreen(
+    rows: List<RowData>,
+    status: String,
+    tmdbKey: String,
+    onOpen: (Title) -> Unit
+) {
+    val listState = rememberLazyListState()
+    val sz = remember { DefaultSizes }
+    val heroTitle = rows.firstOrNull()?.list?.firstOrNull()
+
+    if (status != "ok") {
+        StatusMessage(status)
+    } else {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(bottom = 100.dp),
+            verticalArrangement = Arrangement.spacedBy(32.dp)
+        ) {
+            if (heroTitle != null) {
+                item(key = "tv_hero_banner") {
+                    HeroBanner(heroTitle, onOpen)
+                }
+            }
+            items(rows, key = { rowItem -> "tv-row-${rowItem.title}" }) { row ->
                 ShelfRow(row.title, row.list, sz, tmdbKey, onOpen, isWide = false)
             }
         }
@@ -1873,24 +1990,25 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
 
 @Composable
 fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit) {
-    var query by remember { mutableStateOf("") }
+    var query by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var focused by remember { mutableStateOf(false) }
     var results by remember { mutableStateOf<List<Title>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
 
-    LaunchedEffect(query, tmdbKey) {
-        if (query.trim().length < 2 || tmdbKey.isBlank()) {
+    LaunchedEffect(searchQuery, tmdbKey) {
+        if (searchQuery.trim().length < 2 || tmdbKey.isBlank()) {
             results = emptyList()
             searching = false
         } else {
             searching = true
             delay(250)
-            results = Tmdb.search(query.trim(), tmdbKey)
+            results = Tmdb.search(searchQuery.trim(), tmdbKey)
             searching = false
         }
     }
 
-    val isQuery = query.trim().length >= 2
+    val isQuery = searchQuery.trim().length >= 2
     val showing = if (isQuery) results else fallback
     val label = if (isQuery) "Results" else "Trending"
     val sz = remember { DefaultSizes }
@@ -1903,12 +2021,12 @@ fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit
                 .appleGlass(RoundedCornerShape(22.dp), focused)
                 .padding(horizontal = 22.dp, vertical = 16.dp)
         ) {
-            if (query.isEmpty()) {
+            if (searchQuery.isEmpty()) {
                 Text("Search movies and shows", color = Color.White.copy(alpha = 0.45f), fontSize = 18.sp)
             }
             BasicTextField(
-                value = query,
-                onValueChange = { query = it },
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
                 singleLine = true,
                 textStyle = TextStyle(color = Color.White, fontSize = 18.sp),
                 cursorBrush = SolidColor(Color.White),
@@ -2124,4 +2242,4 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 }
 
-fun maskKey(v: String): String = if (v.length <= 8) "••••••••" else v.take(4) + "••••••••" + v.takeLast(4)
+fn maskKey(v: String): String = if (v.length <= 8) "••••••••" else v.take(4) + "••••••••" + v.takeLast(4)

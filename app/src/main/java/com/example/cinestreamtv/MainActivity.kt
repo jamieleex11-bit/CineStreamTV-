@@ -14,9 +14,11 @@ import android.os.Bundle
 import android.util.Base64
 import android.util.LruCache
 import android.view.KeyEvent
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
+import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -1477,10 +1479,7 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
                     .padding(horizontal = 28.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("â¶", color = playButtonContentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-                    Text("Play", color = playButtonContentColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                }
+                Text("Play", color = playButtonContentColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -1539,34 +1538,29 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.loadsImagesAutomatically = true
+            settings.domStorageEnabled = true
+            settings.javaScriptCanOpenWindowsAutomatically = true
+            settings.allowContentAccess = true
+            settings.allowFileAccess = true
             settings.setSupportZoom(false)
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+            CookieManager.getInstance().setAcceptCookie(true)
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
             setBackgroundColor(android.graphics.Color.BLACK)
             webChromeClient = WebChromeClient()
             webViewClient = WebViewClient()
 
-            val html = """
-                <!doctype html>
-                <html><head>
-                <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-                <style>html,body,#player{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}</style>
-                </head><body><div id="player"></div>
-                <script>
-                  var tag=document.createElement('script');
-                  tag.src='https://www.youtube.com/iframe_api';
-                  document.head.appendChild(tag);
-                  var player;
-                  function onYouTubeIframeAPIReady(){
-                    player=new YT.Player('player',{
-                      width:'100%',height:'100%',videoId:'$safeVideoKey',
-                      playerVars:{autoplay:1,controls:0,disablekb:1,fs:0,playsinline:1,rel:0,iv_load_policy:3,modestbranding:1},
-                      events:{onReady:function(e){e.target.setVolume(80);e.target.unMute();e.target.playVideo();}}
-                    });
-                  }
-                </script></body></html>
-            """.trimIndent()
-            loadDataWithBaseURL("https://www.youtube.com/", html, "text/html", "UTF-8", null)
+            // Load the official YouTube embed URL directly. This gives YouTube a real
+            // HTTPS page/referrer instead of a synthetic loadData page, which avoids
+            // several WebView embed failures that otherwise leave a black rectangle.
+            loadUrl(
+                "https://www.youtube.com/embed/$safeVideoKey" +
+                    "?autoplay=1&mute=0&controls=0&playsinline=1&rel=0" +
+                    "&modestbranding=1&enablejsapi=1&origin=https%3A%2F%2Fwww.youtube.com"
+            )
         }
     }
 
@@ -1934,7 +1928,9 @@ fun NetflixActionButton(text: String, icon: String, primary: Boolean, modifier: 
         contentAlignment = Alignment.CenterStart
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(icon, color = contentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            if (!text.startsWith("Play") && text != "Resume") {
+                Text(icon, color = contentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            }
             Text(text, color = contentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }

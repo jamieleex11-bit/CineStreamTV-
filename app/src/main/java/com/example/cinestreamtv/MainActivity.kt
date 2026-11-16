@@ -17,6 +17,9 @@ import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -461,7 +464,7 @@ object Tmdb {
         }
 
         val genres = o.optJSONArray("genres")?.let { g ->
-            (0 until g.length()).joinToString(" · ") { g.getJSONObject(it).optString("name") }
+            (0 until g.length()).joinToString(" Â· ") { g.getJSONObject(it).optString("name") }
         } ?: ""
 
         val seasons = o.optJSONArray("seasons")?.let { s ->
@@ -538,59 +541,42 @@ object Tmdb {
         }
     }
 
-    suspend fun fetchTrailerUrl(t: Title, key: String): String? = withContext(Dispatchers.IO) {
-        val o = get("/${t.type}/${t.id}/videos", key) ?: return@withContext null
+    private val trailerKeyCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    suspend fun fetchTrailerKey(t: Title, key: String): String? = withContext(Dispatchers.IO) {
+        val cacheId = "${t.type}:${t.id}"
+        trailerKeyCache[cacheId]?.let { return@withContext it.ifEmpty { null } }
+
+        val o = get("/${t.type}/${t.id}/videos", key)
+            ?: return@withContext null
         val results = o.optJSONArray("results") ?: return@withContext null
-        var youtubeKey: String? = null
+
+        var selectedKey: String? = null
+        // Prefer an official YouTube trailer; fall back to another YouTube trailer/teaser.
         for (i in 0 until results.length()) {
             val v = results.optJSONObject(i) ?: continue
-            if (v.optString("site") == "YouTube" && v.optString("type") == "Trailer") {
-                youtubeKey = v.optString("key")
-                break
+            if (v.optString("site") == "YouTube" &&
+                v.optString("type") == "Trailer" &&
+                v.optString("key").isNotBlank()) {
+                selectedKey = v.optString("key")
+                if (v.optString("official").equals("true", ignoreCase = true)) break
             }
         }
-        if (youtubeKey == null && results.length() > 0) {
+        if (selectedKey.isNullOrBlank()) {
             for (i in 0 until results.length()) {
                 val v = results.optJSONObject(i) ?: continue
-                if (v.optString("site") == "YouTube") {
-                    youtubeKey = v.optString("key")
+                if (v.optString("site") == "YouTube" &&
+                    (v.optString("type") == "Teaser" || v.optString("type") == "Clip") &&
+                    v.optString("key").isNotBlank()) {
+                    selectedKey = v.optString("key")
                     break
                 }
             }
         }
-        if (youtubeKey.isNullOrEmpty()) return@withContext null
-        resolveYouTubeStreamUrl(youtubeKey)
+        trailerKeyCache[cacheId] = selectedKey ?: ""
+        selectedKey
     }
 
-    private fun resolveYouTubeStreamUrl(ytKey: String): String? {
-        val instances = listOf("https://inv.nadeko.net", "https://vid.priv.au", "https://invidious.jing.rocks")
-        for (instance in instances) {
-            try {
-                val url = URL("$instance/api/v1/videos/$ytKey")
-                val conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 3000
-                conn.readTimeout = 3000
-                if (conn.responseCode == 200) {
-                    val text = conn.inputStream.bufferedReader().use { it.readText() }
-                    val json = JSONObject(text)
-                    val adaptiveFormats = json.optJSONArray("adaptiveFormats")
-                    if (adaptiveFormats != null) {
-                        for (i in 0 until adaptiveFormats.length()) {
-                            val f = adaptiveFormats.optJSONObject(i) ?: continue
-                            val type = f.optString("type", "")
-                            val streamUrl = f.optString("url", "")
-                            if (type.contains("video/mp4") && streamUrl.isNotEmpty()) {
-                                return streamUrl
-                            }
-                        }
-                    }
-                }
-            } catch (e: Exception) {
-                continue
-            }
-        }
-        return null
-    }
 }
 
 // ======================= Image Engine =======================
@@ -924,7 +910,7 @@ fun CinematicPlayerScreen(
                 ) {
                     if (resolutionState == "searching") {
                         Text("Resolving cached debrid stream...", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("Checking Comet & TorBox for instant playback…", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+                        Text("Checking Comet & TorBox for instant playbackâ¦", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
                     } else {
                         Text("Playback Failed / No Cached Source", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("Could not resolve a playable cached video stream for this title.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
@@ -983,7 +969,7 @@ fun CinematicPlayerScreen(
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GlassButton("« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
+                    GlassButton("Â« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
                         val pos = exoPlayer.currentPosition
                         val target = (pos - 10000L).coerceAtLeast(0L)
                         exoPlayer.seekTo(target)
@@ -991,14 +977,14 @@ fun CinematicPlayerScreen(
                     }
 
                     GlassButton(
-                        if (isPlaying) "⏸ Pause" else "▶ Play",
+                        if (isPlaying) "â¸ Pause" else "â¶ Play",
                         primary = true,
                         modifier = Modifier.focusRequester(playPauseFocus)
                     ) {
                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                     }
 
-                    GlassButton("10s »", modifier = Modifier.focusRequester(forwardFocus)) {
+                    GlassButton("10s Â»", modifier = Modifier.focusRequester(forwardFocus)) {
                         val pos = exoPlayer.currentPosition
                         val dur = exoPlayer.duration.coerceAtLeast(0L)
                         val maxDur = if (dur > 0L) dur else pos + 10000L
@@ -1169,6 +1155,27 @@ fun CinestreamApp() {
 
 data class Quadruple<A, B, C, D, E>(val first: A, val second: B, val third: C, val fourth: D, val fifth: E)
 
+// ======================= Frame TV Brand Mark =======================
+
+@Composable
+fun FrameLogo(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val triangle = Path().apply {
+            moveTo(w * 0.12f, h * 0.07f)
+            lineTo(w * 0.91f, h * 0.50f)
+            lineTo(w * 0.12f, h * 0.93f)
+            close()
+        }
+        drawPath(triangle, Color(0xFFE50914))
+        // The F is drawn inside the play triangle as part of one unified mark.
+        drawRect(Color.White, androidx.compose.ui.geometry.Offset(w * 0.31f, h * 0.29f), androidx.compose.ui.geometry.Size(w * 0.10f, h * 0.43f))
+        drawRect(Color.White, androidx.compose.ui.geometry.Offset(w * 0.31f, h * 0.29f), androidx.compose.ui.geometry.Size(w * 0.34f, h * 0.095f))
+        drawRect(Color.White, androidx.compose.ui.geometry.Offset(w * 0.31f, h * 0.47f), androidx.compose.ui.geometry.Size(w * 0.27f, h * 0.085f))
+    }
+}
+
 // ======================= Netflix Navigation Bar =======================
 
 @Composable
@@ -1182,16 +1189,9 @@ fun TopNav(current: Tab, onSelect: (Tab) -> Unit) {
             Modifier.align(Alignment.CenterStart),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                Modifier
-                    .size(34.dp)
-                    .appleGlass(RoundedCornerShape(10.dp), true),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("C", color = Color(0xFFE50914), fontSize = 19.sp, fontWeight = FontWeight.Black)
-            }
+            FrameLogo(Modifier.size(34.dp))
             Spacer(Modifier.width(10.dp))
-            Text("CineStream", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Frame TV", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
 
         Row(
@@ -1244,7 +1244,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
 fun StatusMessage(status: String) {
     val msg = when (status) {
         "needkey" -> Pair("TMDB isn't configured", "This build has no TMDB key. Check the TMDB_API_KEY GitHub secret and rebuild.")
-        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendations…")
+        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendationsâ¦")
         else -> Pair("Couldn't load titles", "Check the TMDB_API_KEY GitHub secret and your internet connection, then rebuild.")
     }
     Column(
@@ -1436,11 +1436,11 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
             ) {
                 if (t.year.isNotEmpty()) {
                     Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                    Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                 }
                 if (t.rating > 0.0) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("★", color = Color(0xFFFFC107), fontSize = 14.sp)
+                        Text("â", color = Color(0xFFFFC107), fontSize = 14.sp)
                         Text(String.format(Locale.US, "%.1f", t.rating), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -1478,7 +1478,7 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
                 contentAlignment = Alignment.Center
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("▶", color = playButtonContentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("â¶", color = playButtonContentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                     Text("Play", color = playButtonContentColor, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                 }
             }
@@ -1527,6 +1527,63 @@ fun ShelfRow(
     }
 }
 
+// ======================= Embedded YouTube Trailer Preview =======================
+
+@Composable
+fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val safeVideoKey = remember(videoKey) { videoKey.filter { it.isLetterOrDigit() || it == '_' || it == '-' } }
+    val webView = remember(safeVideoKey) {
+        WebView(context).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            settings.loadsImagesAutomatically = true
+            settings.setSupportZoom(false)
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            setBackgroundColor(android.graphics.Color.BLACK)
+            webChromeClient = WebChromeClient()
+            webViewClient = WebViewClient()
+
+            val html = """
+                <!doctype html>
+                <html><head>
+                <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+                <style>html,body,#player{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000}</style>
+                </head><body><div id="player"></div>
+                <script>
+                  var tag=document.createElement('script');
+                  tag.src='https://www.youtube.com/iframe_api';
+                  document.head.appendChild(tag);
+                  var player;
+                  function onYouTubeIframeAPIReady(){
+                    player=new YT.Player('player',{
+                      width:'100%',height:'100%',videoId:'$safeVideoKey',
+                      playerVars:{autoplay:1,controls:0,disablekb:1,fs:0,playsinline:1,rel:0,iv_load_policy:3,modestbranding:1},
+                      events:{onReady:function(e){e.target.setVolume(80);e.target.unMute();e.target.playVideo();}}
+                    });
+                  }
+                </script></body></html>
+            """.trimIndent()
+            loadDataWithBaseURL("https://www.youtube.com/", html, "text/html", "UTF-8", null)
+        }
+    }
+
+    DisposableEffect(webView) {
+        onDispose {
+            webView.stopLoading()
+            webView.loadUrl("about:blank")
+            webView.destroy()
+        }
+    }
+
+    AndroidView(
+        factory = { webView },
+        modifier = modifier
+    )
+}
+
 // ======================= Netflix Card with Trailer Preview =======================
 
 @Composable
@@ -1541,22 +1598,21 @@ fun NetflixCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     var showPreview by remember { mutableStateOf(false) }
-    var trailerUrl by remember { mutableStateOf<String?>(null) }
-    val ctx = LocalContext.current
+    var trailerKey by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(focused) {
+    LaunchedEffect(focused, t.key, tmdbKey) {
         if (focused) {
-            delay(1200) // 1.2s trailer preview debounce
+            delay(1200) // Keep the requested 1.2-second focus delay.
             if (focused) {
-                val url = Tmdb.fetchTrailerUrl(t, tmdbKey)
-                if (focused && !url.isNullOrEmpty()) {
-                    trailerUrl = url
+                val key = Tmdb.fetchTrailerKey(t, tmdbKey)
+                if (focused && !key.isNullOrBlank()) {
+                    trailerKey = key
                     showPreview = true
                 }
             }
         } else {
             showPreview = false
-            trailerUrl = null
+            trailerKey = null
         }
     }
 
@@ -1573,22 +1629,6 @@ fun NetflixCard(
     val activeImageUrl = if (focused) img(t.backdrop ?: t.poster, "w500") else img(t.poster ?: t.backdrop, "w500")
     val ph = remember(t.id) { placeholder(t.id) }
 
-    val exoPlayer = remember(showPreview, trailerUrl) {
-        if (showPreview && !trailerUrl.isNullOrEmpty()) {
-            ExoPlayer.Builder(ctx).build().apply {
-                val mediaItem = MediaItem.fromUri(trailerUrl!!)
-                setMediaItem(mediaItem)
-                repeatMode = Player.REPEAT_MODE_ALL
-                volume = 0.8f
-                prepare()
-                playWhenReady = true
-            }
-        } else null
-    }
-
-    DisposableEffect(exoPlayer) {
-        onDispose { exoPlayer?.release() }
-    }
 
     Box(
         Modifier
@@ -1609,16 +1649,9 @@ fun NetflixCard(
                 onClick = onClick
             )
     ) {
-        if (showPreview && exoPlayer != null && !trailerUrl.isNullOrEmpty()) {
-            AndroidView(
-                factory = { context ->
-                    PlayerView(context).apply {
-                        player = exoPlayer
-                        useController = false
-                        focusable = android.view.View.NOT_FOCUSABLE
-                        layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                    }
-                },
+        if (showPreview && !trailerKey.isNullOrBlank()) {
+            YouTubeTrailerPreview(
+                videoKey = trailerKey!!,
                 modifier = Modifier.fillMaxSize()
             )
             Box(
@@ -1631,7 +1664,7 @@ fun NetflixCard(
                 Column {
                     Text(t.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(2.dp))
-                    Text("${t.year}  ★ ${String.format(Locale.US, "%.1f", t.rating)}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
+                    Text("${t.year}  â ${String.format(Locale.US, "%.1f", t.rating)}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
                 }
             }
         } else {
@@ -1758,7 +1791,7 @@ fun DetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("${t.name} — Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Text("${t.name} â Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                     if ((extra?.seasons?.size ?: 0) > 0) {
                         NetflixSeasonDropdownTrigger(currentSeasonName) { showSeasonPicker = true }
                     }
@@ -1815,17 +1848,17 @@ fun DetailScreen(
                 ) {
                     if (t.year.isNotEmpty()) {
                         Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                     }
                     Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     if (extra?.runtime?.isNotEmpty() == true) {
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                         Text(extra!!.runtime, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                     if (t.rating > 0.0) {
-                        Text("•", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
+                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("★", color = Color(0xFFFFC107), fontSize = 14.sp)
+                            Text("â", color = Color(0xFFFFC107), fontSize = 14.sp)
                             Text(String.format(Locale.US, "%.1f", t.rating), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -1850,17 +1883,17 @@ fun DetailScreen(
                 Spacer(Modifier.height(20.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NetflixActionButton(playButtonText, "▶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
+                    NetflixActionButton(playButtonText, "â¶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
                         onPlay(extra)
                     }
                     if (isShow) {
-                        NetflixActionButton("Episodes", "☰", primary = false) { showEpisodeBrowser = true }
+                        NetflixActionButton("Episodes", "â°", primary = false) { showEpisodeBrowser = true }
                     }
-                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "✓" else "+", primary = false) {
+                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "â" else "+", primary = false) {
                         onToggleSaved()
                     }
                     if (isInContinueWatching) {
-                        NetflixActionButton("Remove from Continue Watching", "✕", primary = false) {
+                        NetflixActionButton("Remove from Continue Watching", "â", primary = false) {
                             onRemoveRecent()
                         }
                     }
@@ -1992,7 +2025,7 @@ fun NetflixSeasonDropdownTrigger(currentSeasonName: String, onClick: () -> Unit)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(currentSeasonName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text("▾", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("â¾", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
     }
 }
@@ -2030,7 +2063,7 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
                         ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text(s.name, color = if (s.number == currentSeason) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                if (s.number == currentSeason) Text("✓", color = Color(0xFF58A6FF), fontSize = 14.sp)
+                                if (s.number == currentSeason) Text("â", color = Color(0xFF58A6FF), fontSize = 14.sp)
                             }
                         }
                     }
@@ -2091,7 +2124,7 @@ fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit
         Spacer(Modifier.height(16.dp))
         when {
             tmdbKey.isBlank() -> Text("TMDB is not configured in this build.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
-            isQuery && showing.isEmpty() -> Text(if (searching) "Searching…" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
+            isQuery && showing.isEmpty() -> Text(if (searching) "Searchingâ¦" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
             else -> ShelfRow(label, showing, sz, tmdbKey, onOpen, isWide = false)
         }
     }
@@ -2228,7 +2261,7 @@ fun AboutPanel() {
         Modifier.fillMaxSize().padding(36.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("CineStream TV", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+        Text("Frame TV", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
         Text("Version 4.0", color = Color.White.copy(alpha = 0.65f), fontSize = 16.sp)
         Spacer(Modifier.height(6.dp))
         Text("Metadata and artwork provided by TMDB.", color = Color.White.copy(alpha = 0.6f), fontSize = 15.sp)
@@ -2292,4 +2325,4 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 }
 
-fun maskKey(v: String): String = if (v.length <= 8) "••••••••" else v.take(4) + "••••••••" + v.takeLast(4)
+fun maskKey(v: String): String = if (v.length <= 8) "â¢â¢â¢â¢â¢â¢â¢â¢" else v.take(4) + "â¢â¢â¢â¢â¢â¢â¢â¢" + v.takeLast(4)

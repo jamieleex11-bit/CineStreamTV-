@@ -1,4 +1,4 @@
-@OptIn(
+@file:OptIn(
     androidx.media3.common.util.UnstableApi::class,
     androidx.compose.ui.ExperimentalComposeUiApi::class
 )

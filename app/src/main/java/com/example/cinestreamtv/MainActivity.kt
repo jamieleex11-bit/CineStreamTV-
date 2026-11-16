@@ -1465,7 +1465,6 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
                 modifier = Modifier
                     .focusRequester(playFocus)
                     .onFocusChanged { playFocused = it.isFocused }
-                    .focusable()
                     .clip(RoundedCornerShape(8.dp))
                     .background(playButtonBg)
                     .border(width = if (playFocused) 3.dp else 1.dp, color = playButtonBorderColor, shape = RoundedCornerShape(8.dp))
@@ -1877,22 +1876,22 @@ fun NetflixActionButton(text: String, icon: String, primary: Boolean, modifier: 
     val shape = RoundedCornerShape(8.dp)
 
     val background = when {
-        focused -> Color(0xFF1F6FEB) // Premium Disney+/HBO blue-violet highlight tint
-        primary -> Color.White.copy(alpha = 0.9f)
+        focused -> Color.White
+        primary -> Color.White.copy(alpha = 0.22f)
         else -> Color(0xFF21262D).copy(alpha = 0.85f)
     }
 
-    val contentColor = if (focused) Color.White else if (primary) Color(0xFF141414) else Color.White
-    val borderColor = if (focused) Color(0xFF58A6FF) else Color.White.copy(alpha = 0.12f)
+    val contentColor = if (focused) Color(0xFF141414) else Color.White
+    val borderColor = if (focused) Color.White else Color.White.copy(alpha = if (primary) 0.35f else 0.12f)
 
     Box(
         modifier = modifier
             .width(340.dp)
+            .onFocusChanged { focused = it.isFocused }
             .clip(shape)
             .background(background)
-            .border(width = if (focused) 3.dp else 1.dp, color = borderColor, shape = shape)
-            .shadow(elevation = if (focused) 16.dp else 0.dp, shape = shape, spotColor = Color(0xFF1F6FEB), ambientColor = Color(0xFF1F6FEB))
-            .onFocusChanged { focused = it.isFocused }
+            .border(width = if (focused) 2.dp else 1.dp, color = borderColor, shape = shape)
+            .shadow(elevation = if (focused) 14.dp else 0.dp, shape = shape, spotColor = Color.White.copy(alpha = 0.5f), ambientColor = Color.White.copy(alpha = 0.5f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

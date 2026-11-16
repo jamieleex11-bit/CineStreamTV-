@@ -1438,11 +1438,10 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
             ) {
                 if (t.year.isNotEmpty()) {
                     Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                    Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
                 }
                 if (t.rating > 0.0) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("â", color = Color(0xFFFFC107), fontSize = 14.sp)
+                        Text("Rating", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                         Text(String.format(Locale.US, "%.1f", t.rating), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -1538,10 +1537,7 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.loadsImagesAutomatically = true
-            settings.domStorageEnabled = true
             settings.javaScriptCanOpenWindowsAutomatically = true
-            settings.allowContentAccess = true
-            settings.allowFileAccess = true
             settings.setSupportZoom(false)
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             CookieManager.getInstance().setAcceptCookie(true)
@@ -1553,14 +1549,29 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
             webChromeClient = WebChromeClient()
             webViewClient = WebViewClient()
 
-            // Load the official YouTube embed URL directly. This gives YouTube a real
-            // HTTPS page/referrer instead of a synthetic loadData page, which avoids
-            // several WebView embed failures that otherwise leave a black rectangle.
-            loadUrl(
-                "https://www.youtube.com/embed/$safeVideoKey" +
-                    "?autoplay=1&mute=0&controls=0&playsinline=1&rel=0" +
-                    "&modestbranding=1&enablejsapi=1&origin=https%3A%2F%2Fwww.youtube.com"
-            )
+            val html = """
+                <!doctype html>
+                <html>
+                <head>
+                  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+                  <meta name="referrer" content="strict-origin-when-cross-origin">
+                  <style>
+                    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
+                    iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+                  </style>
+                </head>
+                <body>
+                  <iframe
+                    src="https://www.youtube.com/embed/$safeVideoKey?autoplay=1&mute=0&controls=0&playsinline=1&rel=0&modestbranding=1&enablejsapi=1"
+                    title="Trailer"
+                    referrerpolicy="strict-origin-when-cross-origin"
+                    allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                    allowfullscreen>
+                  </iframe>
+                </body>
+                </html>
+            """.trimIndent()
+            loadDataWithBaseURL("https://www.youtube.com/", html, "text/html", "UTF-8", null)
         }
     }
 
@@ -1572,10 +1583,7 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
         }
     }
 
-    AndroidView(
-        factory = { webView },
-        modifier = modifier
-    )
+    AndroidView(factory = { webView }, modifier = modifier)
 }
 
 // ======================= Netflix Card with Trailer Preview =======================
@@ -1658,7 +1666,7 @@ fun NetflixCard(
                 Column {
                     Text(t.name, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(2.dp))
-                    Text("${t.year}  â ${String.format(Locale.US, "%.1f", t.rating)}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
+                    Text("${t.year}  ${String.format(Locale.US, "%.1f", t.rating)}", color = Color.White.copy(alpha = 0.75f), fontSize = 11.sp)
                 }
             }
         } else {
@@ -1842,17 +1850,14 @@ fun DetailScreen(
                 ) {
                     if (t.year.isNotEmpty()) {
                         Text(t.year, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
-                    }
+                        }
                     Text(if (isShow) "Series" else "Movie", color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     if (extra?.runtime?.isNotEmpty() == true) {
-                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
-                        Text(extra!!.runtime, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(extra!!.runtime, color = Color.White.copy(alpha = 0.85f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                     }
                     if (t.rating > 0.0) {
-                        Text("â¢", color = Color.White.copy(alpha = 0.3f), fontSize = 14.sp)
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("â", color = Color(0xFFFFC107), fontSize = 14.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Rating", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
                             Text(String.format(Locale.US, "%.1f", t.rating), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                         }
                     }
@@ -1927,12 +1932,7 @@ fun NetflixActionButton(text: String, icon: String, primary: Boolean, modifier: 
             .padding(horizontal = 22.dp, vertical = 10.dp),
         contentAlignment = Alignment.CenterStart
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (!text.startsWith("Play") && text != "Resume") {
-                Text(icon, color = contentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            }
-            Text(text, color = contentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
+        Text(text, color = contentColor, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 

@@ -1706,8 +1706,22 @@ fun DetailScreen(
 
     BackHandler(enabled = showEpisodeBrowser) { showEpisodeBrowser = false }
 
-    Box(Modifier.fillMaxSize().background(Color(0xFF141414))) {
-        RemoteImage(img(t.backdrop ?: t.poster, "original"), Modifier.fillMaxSize())
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(
+                if (showEpisodeBrowser) {
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF0D1117), Color(0xFF04060A), Color(0xFF020305))
+                    )
+                } else {
+                    Brush.verticalGradient(listOf(Color(0xFF141414), Color(0xFF141414)))
+                }
+            )
+    ) {
+        if (!showEpisodeBrowser) {
+            RemoteImage(img(t.backdrop ?: t.poster, "original"), Modifier.fillMaxSize())
+        }
         
         Box(
             Modifier
@@ -1715,8 +1729,8 @@ fun DetailScreen(
                 .fillMaxWidth(0.65f)
                 .background(
                     Brush.horizontalGradient(
-                        0f to Color(0xFF141414).copy(alpha = 0.95f),
-                        0.7f to Color(0xFF141414).copy(alpha = 0.6f),
+                        0f to Color(0xFF0D1117).copy(alpha = 0.98f),
+                        0.7f to Color(0xFF0D1117).copy(alpha = 0.8f),
                         1f to Color.Transparent
                     )
                 )
@@ -1728,8 +1742,8 @@ fun DetailScreen(
                 .background(
                     Brush.verticalGradient(
                         0f to Color.Transparent,
-                        0.65f to Color(0xFF141414).copy(alpha = 0.3f),
-                        1f to Color(0xFF141414)
+                        0.65f to Color(0xFF0D1117).copy(alpha = 0.5f),
+                        1f to Color(0xFF0D1117)
                     )
                 )
         )
@@ -1863,13 +1877,13 @@ fun NetflixActionButton(text: String, icon: String, primary: Boolean, modifier: 
     val shape = RoundedCornerShape(8.dp)
 
     val background = when {
-        focused -> Color(0xFFE50914)
+        focused -> Color(0xFF1F6FEB) // Premium Disney+/HBO blue-violet highlight tint
         primary -> Color.White.copy(alpha = 0.9f)
-        else -> Color(0xFF262626).copy(alpha = 0.7f)
+        else -> Color(0xFF21262D).copy(alpha = 0.85f)
     }
 
     val contentColor = if (focused) Color.White else if (primary) Color(0xFF141414) else Color.White
-    val borderColor = if (focused) Color(0xFFFF4B4B) else Color.White.copy(alpha = 0.12f)
+    val borderColor = if (focused) Color(0xFF58A6FF) else Color.White.copy(alpha = 0.12f)
 
     Box(
         modifier = modifier
@@ -1877,7 +1891,7 @@ fun NetflixActionButton(text: String, icon: String, primary: Boolean, modifier: 
             .clip(shape)
             .background(background)
             .border(width = if (focused) 3.dp else 1.dp, color = borderColor, shape = shape)
-            .shadow(elevation = if (focused) 16.dp else 0.dp, shape = shape, spotColor = Color(0xFFE50914), ambientColor = Color(0xFFE50914))
+            .shadow(elevation = if (focused) 16.dp else 0.dp, shape = shape, spotColor = Color(0xFF1F6FEB), ambientColor = Color(0xFF1F6FEB))
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1899,8 +1913,14 @@ fun VerticalEpisodeRow(e: Episode, progress: Float, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val stillUrl = img(e.still, "w500")
 
-    val bg = if (focused) Color.White.copy(alpha = 0.15f) else Color.Transparent
-    val borderModifier = if (focused) Modifier.border(width = 3.dp, color = Color(0xFFFF4B4B), shape = RoundedCornerShape(10.dp)).shadow(12.dp, RoundedCornerShape(10.dp), spotColor = Color(0xFFE50914)) else Modifier
+    val bg = if (focused) Color(0xFF161B22).copy(alpha = 0.95f) else Color(0xFF0D1117).copy(alpha = 0.6f)
+    val borderModifier = if (focused) {
+        Modifier
+            .border(width = 2.dp, color = Color(0xFF58A6FF), shape = RoundedCornerShape(10.dp))
+            .shadow(14.dp, RoundedCornerShape(10.dp), spotColor = Color(0xFF1F6FEB), ambientColor = Color(0xFF1F6FEB))
+    } else {
+        Modifier.border(width = 1.dp, color = Color.White.copy(alpha = 0.08f), shape = RoundedCornerShape(10.dp))
+    }
 
     Row(
         modifier = Modifier
@@ -1934,7 +1954,7 @@ fun VerticalEpisodeRow(e: Episode, progress: Float, onClick: () -> Unit) {
                         .height(3.dp)
                         .background(Color.Black.copy(alpha = 0.6f))
                 ) {
-                    Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(Color(0xFFE50914)))
+                    Box(Modifier.fillMaxWidth(progress).fillMaxHeight().background(Color(0xFF58A6FF)))
                 }
             }
         }
@@ -1960,8 +1980,8 @@ fun NetflixSeasonDropdownTrigger(currentSeasonName: String, onClick: () -> Unit)
     Box(
         modifier = Modifier
             .clip(shape)
-            .background(if (focused) Color.White else Color.White.copy(alpha = 0.12f))
-            .border(1.dp, Color.White.copy(alpha = 0.3f), shape)
+            .background(if (focused) Color(0xFF1F6FEB) else Color(0xFF21262D))
+            .border(1.dp, if (focused) Color(0xFF58A6FF) else Color.White.copy(alpha = 0.2f), shape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1972,8 +1992,8 @@ fun NetflixSeasonDropdownTrigger(currentSeasonName: String, onClick: () -> Unit)
         contentAlignment = Alignment.Center
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(currentSeasonName, color = if (focused) Color.Black else Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text("▾", color = if (focused) Color.Black else Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text(currentSeasonName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("▾", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
     }
 }
@@ -1986,7 +2006,7 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
             modifier = Modifier
                 .width(300.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color(0xFF181818))
+                .background(Color(0xFF161B22))
                 .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
                 .padding(20.dp)
         ) {
@@ -1999,7 +2019,8 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(if (focused) Color.White else Color.Transparent)
+                                .background(if (focused) Color(0xFF1F6FEB) else Color.Transparent)
+                                .border(width = if (focused) 1.dp else 0.dp, color = if (focused) Color(0xFF58A6FF) else Color.Transparent, shape = RoundedCornerShape(6.dp))
                                 .onFocusChanged { focused = it.isFocused }
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
@@ -2009,8 +2030,8 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
                                 .padding(horizontal = 14.dp, vertical = 10.dp)
                         ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                Text(s.name, color = if (focused) Color.Black else if (s.number == currentSeason) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                if (s.number == currentSeason) Text("✓", color = if (focused) Color.Black else Color.White, fontSize = 14.sp)
+                                Text(s.name, color = if (s.number == currentSeason) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                if (s.number == currentSeason) Text("✓", color = Color(0xFF58A6FF), fontSize = 14.sp)
                             }
                         }
                     }

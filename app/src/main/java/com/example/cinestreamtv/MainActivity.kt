@@ -1575,10 +1575,9 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            // Do not force WebView into a separate hardware layer: that can leave
-            // Chromium's inline video surface black while its audio continues.
-            // LAYER_TYPE_NONE lets WebView use the already-accelerated Activity window.
-            setLayerType(View.LAYER_TYPE_NONE, null)
+            // Use a hardware-backed WebView layer for Chromium's inline YouTube video.
+            // The containing Compose card and hero no longer clip this view while active.
+            setLayerType(View.LAYER_TYPE_HARDWARE, null)
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
             setBackgroundColor(android.graphics.Color.BLACK)

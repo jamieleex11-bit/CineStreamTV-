@@ -16,6 +16,7 @@ import android.util.LruCache
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.Toast
 import android.webkit.CookieManager
@@ -89,6 +90,11 @@ import org.json.JSONObject
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // YouTube's inline video surface needs the Activity window to be hardware accelerated.
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        )
         setContent { CinestreamApp() }
     }
 }
@@ -1568,10 +1574,13 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
-            setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            // Do not force WebView into a separate hardware layer: that can leave
+            // Chromium's inline video surface black while its audio continues.
+            // LAYER_TYPE_NONE lets WebView use the already-accelerated Activity window.
+            setLayerType(View.LAYER_TYPE_NONE, null)
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
-            setBackgroundColor(android.graphics.Color.BLACK)
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
             webChromeClient = WebChromeClient()
             webViewClient = WebViewClient()
 
@@ -1582,11 +1591,13 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
                   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
                   <meta name="referrer" content="origin">
                   <style>
-                    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
-                    iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+                    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:transparent; }
+                    #player { position:absolute; left:0; top:0; width:100%; height:100%; background:#000; }
+                    iframe { display:block; width:100%; height:100%; border:0; background:#000; }
                   </style>
                 </head>
                 <body>
+                  <div id="player">
                   <iframe
                     src="https://www.youtube.com/embed/$safeVideoKey?autoplay=1&mute=0&controls=0&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https%3A%2F%2Fcom.example.cinestreamtv"
                     title="Trailer"
@@ -1594,6 +1605,7 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
                     allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
                     allowfullscreen>
                   </iframe>
+                  </div>
                 </body>
                 </html>
             """.trimIndent()

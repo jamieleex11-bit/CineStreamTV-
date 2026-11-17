@@ -472,7 +472,7 @@ object Tmdb {
         }
 
         val genres = o.optJSONArray("genres")?.let { g ->
-            (0 until g.length()).joinToString(" ÃÂ· ") { g.getJSONObject(it).optString("name") }
+            (0 until g.length()).joinToString(" ÃÂÃÂ· ") { g.getJSONObject(it).optString("name") }
         } ?: ""
 
         val seasons = o.optJSONArray("seasons")?.let { s ->
@@ -918,7 +918,7 @@ fun CinematicPlayerScreen(
                 ) {
                     if (resolutionState == "searching") {
                         Text("Resolving cached debrid stream...", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("Checking Comet & TorBox for instant playbackÃ¢ÂÂ¦", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+                        Text("Checking Comet & TorBox for instant playbackÃÂ¢ÃÂÃÂ¦", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
                     } else {
                         Text("Playback Failed / No Cached Source", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("Could not resolve a playable cached video stream for this title.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
@@ -977,7 +977,7 @@ fun CinematicPlayerScreen(
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GlassButton("ÃÂ« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
+                    GlassButton("ÃÂÃÂ« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
                         val pos = exoPlayer.currentPosition
                         val target = (pos - 10000L).coerceAtLeast(0L)
                         exoPlayer.seekTo(target)
@@ -985,14 +985,14 @@ fun CinematicPlayerScreen(
                     }
 
                     GlassButton(
-                        if (isPlaying) "Ã¢ÂÂ¸ Pause" else "Ã¢ÂÂ¶ Play",
+                        if (isPlaying) "ÃÂ¢ÃÂÃÂ¸ Pause" else "ÃÂ¢ÃÂÃÂ¶ Play",
                         primary = true,
                         modifier = Modifier.focusRequester(playPauseFocus)
                     ) {
                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                     }
 
-                    GlassButton("10s ÃÂ»", modifier = Modifier.focusRequester(forwardFocus)) {
+                    GlassButton("10s ÃÂÃÂ»", modifier = Modifier.focusRequester(forwardFocus)) {
                         val pos = exoPlayer.currentPosition
                         val dur = exoPlayer.duration.coerceAtLeast(0L)
                         val maxDur = if (dur > 0L) dur else pos + 10000L
@@ -1252,7 +1252,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
 fun StatusMessage(status: String) {
     val msg = when (status) {
         "needkey" -> Pair("TMDB isn't configured", "This build has no TMDB key. Check the TMDB_API_KEY GitHub secret and rebuild.")
-        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendationsÃ¢ÂÂ¦")
+        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendationsÃÂ¢ÃÂÃÂ¦")
         else -> Pair("Couldn't load titles", "Check the TMDB_API_KEY GitHub secret and your internet connection, then rebuild.")
     }
     Column(
@@ -1406,7 +1406,8 @@ fun HeroBanner(t: Title, tmdbKey: String, onOpen: (Title) -> Unit) {
             .fillMaxWidth()
             .height(420.dp)
             .padding(horizontal = 64.dp)
-            .clip(shape)
+            // WebView's inline video surface cannot render correctly inside Compose clipping.
+            .then(if (showHeroTrailer) Modifier else Modifier.clip(shape))
             .onFocusChanged { focused = it.hasFocus }
             .border(width = if (focused) 2.dp else 0.dp, color = if (focused) Color.White else Color.Transparent, shape = shape)
             .clickable(
@@ -1580,7 +1581,7 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
             setLayerType(View.LAYER_TYPE_NONE, null)
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            setBackgroundColor(android.graphics.Color.BLACK)
             webChromeClient = WebChromeClient()
             webViewClient = WebViewClient()
 
@@ -1591,7 +1592,7 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
                   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
                   <meta name="referrer" content="origin">
                   <style>
-                    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:transparent; }
+                    html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
                     #player { position:absolute; left:0; top:0; width:100%; height:100%; background:#000; }
                     iframe { display:block; width:100%; height:100%; border:0; background:#000; }
                   </style>
@@ -1680,7 +1681,8 @@ fun NetflixCard(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clip(shape)
+            // Do not clip the AndroidView while its YouTube video surface is active.
+            .then(if (showPreview) Modifier else Modifier.clip(shape))
             .background(Brush.linearGradient(ph))
             .then(if (focused) Modifier.border(2.dp, Color.White, shape) else Modifier)
             .clickable(
@@ -1831,7 +1833,7 @@ fun DetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("${t.name} Ã¢ÂÂ Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Text("${t.name} ÃÂ¢ÃÂÃÂ Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                     if ((extra?.seasons?.size ?: 0) > 0) {
                         NetflixSeasonDropdownTrigger(currentSeasonName) { showSeasonPicker = true }
                     }
@@ -1920,17 +1922,17 @@ fun DetailScreen(
                 Spacer(Modifier.height(20.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NetflixActionButton(playButtonText, "Ã¢ÂÂ¶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
+                    NetflixActionButton(playButtonText, "ÃÂ¢ÃÂÃÂ¶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
                         onPlay(extra)
                     }
                     if (isShow) {
-                        NetflixActionButton("Episodes", "Ã¢ÂÂ°", primary = false) { showEpisodeBrowser = true }
+                        NetflixActionButton("Episodes", "ÃÂ¢ÃÂÃÂ°", primary = false) { showEpisodeBrowser = true }
                     }
-                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "Ã¢ÂÂ" else "+", primary = false) {
+                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "ÃÂ¢ÃÂÃÂ" else "+", primary = false) {
                         onToggleSaved()
                     }
                     if (isInContinueWatching) {
-                        NetflixActionButton("Remove from Continue Watching", "Ã¢ÂÂ", primary = false) {
+                        NetflixActionButton("Remove from Continue Watching", "ÃÂ¢ÃÂÃÂ", primary = false) {
                             onRemoveRecent()
                         }
                     }
@@ -2059,7 +2061,7 @@ fun NetflixSeasonDropdownTrigger(currentSeasonName: String, onClick: () -> Unit)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(currentSeasonName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text("Ã¢ÂÂ¾", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("ÃÂ¢ÃÂÃÂ¾", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
     }
 }
@@ -2097,7 +2099,7 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
                         ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text(s.name, color = if (s.number == currentSeason) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                if (s.number == currentSeason) Text("Ã¢ÂÂ", color = Color(0xFF58A6FF), fontSize = 14.sp)
+                                if (s.number == currentSeason) Text("ÃÂ¢ÃÂÃÂ", color = Color(0xFF58A6FF), fontSize = 14.sp)
                             }
                         }
                     }
@@ -2158,7 +2160,7 @@ fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit
         Spacer(Modifier.height(16.dp))
         when {
             tmdbKey.isBlank() -> Text("TMDB is not configured in this build.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
-            isQuery && showing.isEmpty() -> Text(if (searching) "SearchingÃ¢ÂÂ¦" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
+            isQuery && showing.isEmpty() -> Text(if (searching) "SearchingÃÂ¢ÃÂÃÂ¦" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
             else -> ShelfRow(label, showing, sz, tmdbKey, onOpen, isWide = false)
         }
     }
@@ -2359,4 +2361,4 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 }
 
-fun maskKey(v: String): String = if (v.length <= 8) "Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" else v.take(4) + "Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" + v.takeLast(4)
+fun maskKey(v: String): String = if (v.length <= 8) "ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢" else v.take(4) + "ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢ÃÂ¢ÃÂÃÂ¢" + v.takeLast(4)

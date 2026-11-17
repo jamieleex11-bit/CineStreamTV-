@@ -466,7 +466,7 @@ object Tmdb {
         }
 
         val genres = o.optJSONArray("genres")?.let { g ->
-            (0 until g.length()).joinToString(" Â· ") { g.getJSONObject(it).optString("name") }
+            (0 until g.length()).joinToString(" ÃÂ· ") { g.getJSONObject(it).optString("name") }
         } ?: ""
 
         val seasons = o.optJSONArray("seasons")?.let { s ->
@@ -912,7 +912,7 @@ fun CinematicPlayerScreen(
                 ) {
                     if (resolutionState == "searching") {
                         Text("Resolving cached debrid stream...", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("Checking Comet & TorBox for instant playbackâ¦", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
+                        Text("Checking Comet & TorBox for instant playbackÃ¢ÂÂ¦", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
                     } else {
                         Text("Playback Failed / No Cached Source", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Text("Could not resolve a playable cached video stream for this title.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp)
@@ -971,7 +971,7 @@ fun CinematicPlayerScreen(
                     horizontalArrangement = Arrangement.spacedBy(20.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GlassButton("Â« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
+                    GlassButton("ÃÂ« 10s", modifier = Modifier.focusRequester(rewindFocus)) {
                         val pos = exoPlayer.currentPosition
                         val target = (pos - 10000L).coerceAtLeast(0L)
                         exoPlayer.seekTo(target)
@@ -979,14 +979,14 @@ fun CinematicPlayerScreen(
                     }
 
                     GlassButton(
-                        if (isPlaying) "â¸ Pause" else "â¶ Play",
+                        if (isPlaying) "Ã¢ÂÂ¸ Pause" else "Ã¢ÂÂ¶ Play",
                         primary = true,
                         modifier = Modifier.focusRequester(playPauseFocus)
                     ) {
                         if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                     }
 
-                    GlassButton("10s Â»", modifier = Modifier.focusRequester(forwardFocus)) {
+                    GlassButton("10s ÃÂ»", modifier = Modifier.focusRequester(forwardFocus)) {
                         val pos = exoPlayer.currentPosition
                         val dur = exoPlayer.duration.coerceAtLeast(0L)
                         val maxDur = if (dur > 0L) dur else pos + 10000L
@@ -1246,7 +1246,7 @@ fun NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
 fun StatusMessage(status: String) {
     val msg = when (status) {
         "needkey" -> Pair("TMDB isn't configured", "This build has no TMDB key. Check the TMDB_API_KEY GitHub secret and rebuild.")
-        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendationsâ¦")
+        "loading" -> Pair("Loading Netflix Catalogs", "Fetching recommendationsÃ¢ÂÂ¦")
         else -> Pair("Couldn't load titles", "Check the TMDB_API_KEY GitHub secret and your internet connection, then rebuild.")
     }
     Column(
@@ -1284,7 +1284,7 @@ fun HomeScreen(
         ) {
             if (heroTitle != null) {
                 item(key = "hero_banner") {
-                    HeroBanner(heroTitle, onOpen)
+                    HeroBanner(heroTitle, tmdbKey, onOpen)
                 }
             }
             if (recentList.isNotEmpty()) {
@@ -1323,7 +1323,7 @@ fun MoviesScreen(
         ) {
             if (heroTitle != null) {
                 item(key = "movies_hero_banner") {
-                    HeroBanner(heroTitle, onOpen)
+                    HeroBanner(heroTitle, tmdbKey, onOpen)
                 }
             }
             items(rows, key = { rowItem -> "movie-row-${rowItem.title}" }) { row ->
@@ -1357,7 +1357,7 @@ fun TvShowsScreen(
         ) {
             if (heroTitle != null) {
                 item(key = "tv_hero_banner") {
-                    HeroBanner(heroTitle, onOpen)
+                    HeroBanner(heroTitle, tmdbKey, onOpen)
                 }
             }
             items(rows, key = { rowItem -> "tv-row-${rowItem.title}" }) { row ->
@@ -1370,11 +1370,30 @@ fun TvShowsScreen(
 // ======================= Netflix Hero Banner =======================
 
 @Composable
-fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
+fun HeroBanner(t: Title, tmdbKey: String, onOpen: (Title) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     var playFocused by remember { mutableStateOf(false) }
+    var heroTrailerKey by remember(t.key) { mutableStateOf<String?>(null) }
+    var showHeroTrailer by remember(t.key) { mutableStateOf(false) }
     val shape = RoundedCornerShape(12.dp)
     val playFocus = remember { FocusRequester() }
+
+    // Start the hero trailer only after the banner has remained focused.
+    LaunchedEffect(focused, t.key, tmdbKey) {
+        if (focused) {
+            delay(1200)
+            if (focused) {
+                val key = Tmdb.fetchTrailerKey(t, tmdbKey)
+                if (focused && !key.isNullOrBlank()) {
+                    heroTrailerKey = key
+                    showHeroTrailer = true
+                }
+            }
+        } else {
+            showHeroTrailer = false
+            heroTrailerKey = null
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -1382,7 +1401,7 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
             .height(420.dp)
             .padding(horizontal = 64.dp)
             .clip(shape)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged { focused = it.hasFocus }
             .border(width = if (focused) 2.dp else 0.dp, color = if (focused) Color.White else Color.Transparent, shape = shape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1390,7 +1409,14 @@ fun HeroBanner(t: Title, onOpen: (Title) -> Unit) {
                 onClick = { onOpen(t) }
             )
     ) {
-        RemoteImage(img(t.backdrop ?: t.poster, "original"), Modifier.fillMaxSize())
+        if (showHeroTrailer && !heroTrailerKey.isNullOrBlank()) {
+            YouTubeTrailerPreview(
+                videoKey = heroTrailerKey!!,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            RemoteImage(img(t.backdrop ?: t.poster, "original"), Modifier.fillMaxSize())
+        }
 
         Box(
             Modifier
@@ -1554,7 +1580,7 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
                 <html>
                 <head>
                   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-                  <meta name="referrer" content="strict-origin-when-cross-origin">
+                  <meta name="referrer" content="origin">
                   <style>
                     html, body { margin:0; padding:0; width:100%; height:100%; overflow:hidden; background:#000; }
                     iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
@@ -1562,16 +1588,16 @@ fun YouTubeTrailerPreview(videoKey: String, modifier: Modifier = Modifier) {
                 </head>
                 <body>
                   <iframe
-                    src="https://www.youtube.com/embed/$safeVideoKey?autoplay=1&mute=0&controls=0&playsinline=1&rel=0&modestbranding=1&enablejsapi=1"
+                    src="https://www.youtube.com/embed/$safeVideoKey?autoplay=1&mute=0&controls=0&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https%3A%2F%2Fcom.example.cinestreamtv"
                     title="Trailer"
-                    referrerpolicy="strict-origin-when-cross-origin"
+                    referrerpolicy="strict-origin"
                     allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
                     allowfullscreen>
                   </iframe>
                 </body>
                 </html>
             """.trimIndent()
-            loadDataWithBaseURL("https://www.youtube.com/", html, "text/html", "UTF-8", null)
+            loadDataWithBaseURL("https://com.example.cinestreamtv/", html, "text/html", "UTF-8", null)
         }
     }
 
@@ -1793,7 +1819,7 @@ fun DetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("${t.name} â Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
+                    Text("${t.name} Ã¢ÂÂ Episodes", color = Color.White, fontSize = 26.sp, fontWeight = FontWeight.Bold)
                     if ((extra?.seasons?.size ?: 0) > 0) {
                         NetflixSeasonDropdownTrigger(currentSeasonName) { showSeasonPicker = true }
                     }
@@ -1882,17 +1908,17 @@ fun DetailScreen(
                 Spacer(Modifier.height(20.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    NetflixActionButton(playButtonText, "â¶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
+                    NetflixActionButton(playButtonText, "Ã¢ÂÂ¶", primary = true, modifier = Modifier.focusRequester(playFocus)) {
                         onPlay(extra)
                     }
                     if (isShow) {
-                        NetflixActionButton("Episodes", "â°", primary = false) { showEpisodeBrowser = true }
+                        NetflixActionButton("Episodes", "Ã¢ÂÂ°", primary = false) { showEpisodeBrowser = true }
                     }
-                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "â" else "+", primary = false) {
+                    NetflixActionButton(if (saved) "Remove from My List" else "Add to My List", if (saved) "Ã¢ÂÂ" else "+", primary = false) {
                         onToggleSaved()
                     }
                     if (isInContinueWatching) {
-                        NetflixActionButton("Remove from Continue Watching", "â", primary = false) {
+                        NetflixActionButton("Remove from Continue Watching", "Ã¢ÂÂ", primary = false) {
                             onRemoveRecent()
                         }
                     }
@@ -2021,7 +2047,7 @@ fun NetflixSeasonDropdownTrigger(currentSeasonName: String, onClick: () -> Unit)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(currentSeasonName, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text("â¾", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
+            Text("Ã¢ÂÂ¾", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp)
         }
     }
 }
@@ -2059,7 +2085,7 @@ fun SeasonSelectionDialog(seasons: List<SeasonInfo>, currentSeason: Int, onSelec
                         ) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text(s.name, color = if (s.number == currentSeason) Color.White else Color.White.copy(alpha = 0.7f), fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                if (s.number == currentSeason) Text("â", color = Color(0xFF58A6FF), fontSize = 14.sp)
+                                if (s.number == currentSeason) Text("Ã¢ÂÂ", color = Color(0xFF58A6FF), fontSize = 14.sp)
                             }
                         }
                     }
@@ -2120,7 +2146,7 @@ fun SearchScreen(tmdbKey: String, fallback: List<Title>, onOpen: (Title) -> Unit
         Spacer(Modifier.height(16.dp))
         when {
             tmdbKey.isBlank() -> Text("TMDB is not configured in this build.", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
-            isQuery && showing.isEmpty() -> Text(if (searching) "Searchingâ¦" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
+            isQuery && showing.isEmpty() -> Text(if (searching) "SearchingÃ¢ÂÂ¦" else "No results", color = Color.White.copy(alpha = 0.6f), fontSize = 16.sp, modifier = Modifier.padding(start = 64.dp, top = 20.dp))
             else -> ShelfRow(label, showing, sz, tmdbKey, onOpen, isWide = false)
         }
     }
@@ -2321,4 +2347,4 @@ fun SecretField(label: String, value: String, onChange: (String) -> Unit) {
     }
 }
 
-fun maskKey(v: String): String = if (v.length <= 8) "â¢â¢â¢â¢â¢â¢â¢â¢" else v.take(4) + "â¢â¢â¢â¢â¢â¢â¢â¢" + v.takeLast(4)
+fun maskKey(v: String): String = if (v.length <= 8) "Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" else v.take(4) + "Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢Ã¢ÂÂ¢" + v.takeLast(4)
